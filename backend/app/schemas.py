@@ -40,6 +40,12 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 
+class PublicUserResponse(BaseModel):
+    id: int
+    username: str
+    display_name: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
