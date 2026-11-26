@@ -57,6 +57,13 @@ data class GodheadMessagePage(
     val nextBeforeId: Long?
 )
 
+data class GodheadRemoteSession(
+    val id: Long,
+    val createdAt: String,
+    val expiresAt: String,
+    val isCurrent: Boolean
+)
+
 class GodheadApiException(
     val statusCode: Int,
     val serverMessage: String
@@ -252,6 +259,37 @@ class GodheadApiClient(baseUrl: String) {
         val nextBefore = if (response.isNull("next_before_id")) null
             else response.getLong("next_before_id")
         return GodheadMessagePage(messages, nextBefore)
+    }
+
+    suspend fun listSessions(accessToken: String): List<GodheadRemoteSession> {
+        val request = authorizedRequest("v1/auth/sessions", accessToken)
+            .get()
+            .build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                val session = array.getJSONObject(index)
+                add(
+                    GodheadRemoteSession(
+                        id = session.getLong("id"),
+                        createdAt = session.optString("created_at"),
+                        expiresAt = session.optString("expires_at"),
+                        isCurrent = session.optBoolean("is_current")
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun revokeSession(accessToken: String, sessionId: Long) {
+        require(sessionId > 0) { "Session ID must be positive" }
+        val request = authorizedRequest("v1/auth/sessions/$sessionId", accessToken)
+            .delete()
+            .build()
+        val response = execute(request)
+        if (!response.optBoolean("revoked")) {
+            throw IOException("GODHEAD did not confirm remote session revocation")
+        }
     }
 
     private fun authorizedRequest(path: String, token: String): Request.Builder {
