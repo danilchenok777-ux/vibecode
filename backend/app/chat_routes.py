@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 import logging
 
@@ -13,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user
+from .config import get_settings
 from .database import get_db
 from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, User
 from .chat_schemas import (
@@ -364,7 +364,7 @@ def get_conversation_attachment_download(
         logger.exception("GODHEAD attachment download URL generation failed")
         raise HTTPException(status_code=503, detail="Attachment storage is unavailable") from error
 
-    settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
+    settings = get_settings()
     return AttachmentDownloadResponse(
         attachment=AttachmentResponse(
             id=attachment.id,
