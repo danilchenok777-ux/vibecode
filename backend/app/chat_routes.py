@@ -18,7 +18,8 @@ from .models import Attachment, Conversation, ConversationMember, ConversationRe
 from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
     MessagePageResponse, MessageResponse, MarkConversationReadRequest,
-    ConversationReadStateResponse, AttachmentDownloadResponse, AttachmentResponse,\n    MessageDeliveryStateResponse,
+    ConversationReadStateResponse, AttachmentDownloadResponse, AttachmentResponse,
+    MessageDeliveryStateResponse,
 )
 from .chat_realtime import connection_manager
 from .storage import (
