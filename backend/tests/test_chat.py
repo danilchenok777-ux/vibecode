@@ -234,9 +234,9 @@ def test_read_cursors_are_member_scoped_and_never_move_backwards():
 
 def test_read_cursor_rejects_message_from_another_conversation():
     with TestClient(app) as client:
-        token_a, user_b = register(client, "read_owner")
-        token_b, _ = register(client, "read_member")
-        token_c, _ = register(client, "read_other")
+        token_a, _ = register(client, "read_owner")
+        token_b, user_b = register(client, "read_member")
+        token_c, user_c = register(client, "read_other")
 
         first_chat = client.post(
             f"/v1/conversations/direct/{user_b['id']}",
@@ -246,7 +246,7 @@ def test_read_cursor_rejects_message_from_another_conversation():
         first_id = first_chat.json()["id"]
 
         second_chat = client.post(
-            f"/v1/conversations/direct/{(register(client, 'read_third')[1])['id']}",
+            f"/v1/conversations/direct/{user_c['id']}",
             headers=auth(token_b),
         )
         assert second_chat.status_code == 200
