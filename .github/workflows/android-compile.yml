@@ -1,0 +1,122 @@
+name: GODHEAD Android compile verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "TMessagesProj/**"
+      - "TMessagesProj_Modules/**"
+      - "baselineprofile/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "gradlew"
+      - "settings.gradle"
+      - "build.gradle"
+      - "gradle.properties"
+      - ".gitmodules"
+      - ".github/workflows/android-compile.yml"
+  pull_request:
+    paths:
+      - "TMessagesProj/**"
+      - "TMessagesProj_Modules/**"
+      - "baselineprofile/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "gradlew"
+      - "settings.gradle"
+      - "build.gradle"
+      - "gradle.properties"
+      - ".gitmodules"
+      - ".github/workflows/android-compile.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: godhead-android-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize pinned upstream submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ && $2 !~ /\/test262$/ { print; bad=1 } END { exit bad }'; then
+            echo "::error::A required pinned submodule is missing or mismatched."
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android build tools
+        run: |
+          sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;4.0.0"
+
+      - name: Set up Python 3.11 for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure non-production compile-only keys
+        run: |
+          {
+            printf 'APP_ID=12345\n'
+            printf 'APP_HASH="0123456789abcdef0123456789abcdef"\n'
+            printf 'MAPS_V2_API="AIzaSyGODHEAD_COMPILE_ONLY_NOT_A_REAL_KEY"\n'
+          } > API_KEYS
+
+          mkdir -p TMessagesProj
+          cat > TMessagesProj/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "godhead-compile-validation",
+              "storage_bucket": "godhead-compile-validation.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.godhead.messenger"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyGODHEAD_COMPILE_ONLY_NOT_A_REAL_KEY"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+
+      - name: Compile GODHEAD full ARM64 debug variant
+        env:
+          JAVA_TOOL_OPTIONS: -Xmx5g
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" :TMessagesProj:assembleFullArm64Debug
