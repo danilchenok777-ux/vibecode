@@ -137,3 +137,22 @@ class Attachment(Base):
         server_default=func.now(), nullable=False
     )
     message: Mapped["Message"] = relationship("Message", back_populates="attachment")
+
+class MessageDelivery(Base):
+    __tablename__ = "message_deliveries"
+    __table_args__ = (
+        Index("ix_message_deliveries_user_id", "user_id"),
+    )
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
