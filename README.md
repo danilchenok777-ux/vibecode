@@ -24,6 +24,20 @@ The complete product target includes independently operated GODHEAD accounts, pr
 
 Follow [UPSTREAM_README.md](UPSTREAM_README.md) for Android build prerequisites. Supply your own Telegram API ID/hash while Telegram MTProto remains in use, and your own Firebase configuration if Firebase-based upstream features remain enabled. Never commit API credentials, Firebase configuration, signing keys, keystores or passwords.
 
+### Creating a signed Android APK
+
+The manual workflow **GODHEAD Android APK** builds the full ARM64 debug variant using your own API configuration and signing key. Before running it, add these repository Actions secrets:
+
+- `TELEGRAM_APP_ID` and `TELEGRAM_APP_HASH` — your own Telegram API credentials while the upstream MTProto transport is still present.
+- `MAPS_V2_API` — your Google Maps Android API key.
+- `GODHEAD_GOOGLE_SERVICES_JSON` — Firebase configuration JSON containing package `com.godhead.messenger`.
+- `GODHEAD_SIGNING_KEYSTORE_BASE64` — base64-encoded JKS keystore.
+- `GODHEAD_SIGNING_KEY_STORE_PASSWORD`, `GODHEAD_SIGNING_KEY_ALIAS`, and `GODHEAD_SIGNING_KEY_PASSWORD` — signing details for that keystore.
+
+Then open **Actions → GODHEAD Android APK → Run workflow**. The workflow validates the Firebase package and signing keystore, builds the APK, and publishes it as a 14-day artifact. Do not reuse ExteraGram's keystore or publish compile-validation builds as production releases.
+
+The separate **GODHEAD Android compile verification** workflow uses disposable compile-only credentials and a temporary signing key. Its purpose is to catch source/build errors; those keys are not valid production credentials.
+
 ## Service boundary
 
 Telegram/MTProto networking remains upstream functionality until a GODHEAD replacement is implemented, security-reviewed, tested and deliberately enabled. The GODHEAD identity endpoints are separate from Telegram account sessions.
