@@ -8,7 +8,7 @@ import android.content.Context
  */
 class GodheadAccountRepository(
     context: Context,
-    apiBaseUrl: String
+    private val apiBaseUrl: String
 ) {
     private val api = GodheadApiClient(apiBaseUrl)
     private val sessions = GodheadSessionStore(context)
@@ -34,6 +34,12 @@ class GodheadAccountRepository(
         val token = sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
         return api.currentUser(token)
+    }
+
+    fun connectRealtime(listener: GodheadRealtimeClient.Listener): GodheadRealtimeClient {
+        val token = sessions.readAccessToken()
+            ?: throw IllegalStateException("No GODHEAD session is stored on this device")
+        return GodheadRealtimeClient(apiBaseUrl, token, listener).also { it.connect() }
     }
 
     fun signOut() {
