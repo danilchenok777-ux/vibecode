@@ -5,6 +5,7 @@ from .config import get_settings
 from .database import Base, _engine
 from . import models  # noqa: F401
 from .routes import router
+from .chat_routes import router as chat_router
 
 
 @asynccontextmanager
@@ -18,8 +19,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="GODHEAD API",
-    version="0.1.0",
-    description="GODHEAD identity service",
+    version="0.2.0",
+    description="GODHEAD identity and messaging API",
     lifespan=lifespan,
 )
 settings = get_settings()
@@ -31,6 +32,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(router)
+app.include_router(chat_router)
 
 
 @app.get("/health/live", tags=["operations"])
