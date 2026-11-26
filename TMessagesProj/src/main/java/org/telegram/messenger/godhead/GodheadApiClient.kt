@@ -102,6 +102,20 @@ class GodheadApiClient(baseUrl: String) {
         return authRequest("v1/auth/login", payload)
     }
 
+    suspend fun logout(accessToken: String) {
+        require(accessToken.isNotBlank()) { "Access token is required" }
+        val request = Request.Builder()
+            .url(baseUrl + "v1/auth/logout")
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $accessToken")
+            .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val response = execute(request)
+        if (!response.optBoolean("revoked")) {
+            throw IOException("GODHEAD did not confirm session revocation")
+        }
+    }
+
     suspend fun currentUser(accessToken: String): GodheadUser {
         require(accessToken.isNotBlank()) { "Access token is required" }
         val request = Request.Builder()
