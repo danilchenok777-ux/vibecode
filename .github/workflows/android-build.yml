@@ -1,0 +1,91 @@
+name: GODHEAD Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: godhead-android-build
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Validate private build configuration
+        env:
+          APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
+          APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+          MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
+          GODHEAD_GOOGLE_SERVICES_JSON: ${{ secrets.GODHEAD_GOOGLE_SERVICES_JSON }}
+        run: |
+          test -n "$APP_ID" || { echo "::error::Add TELEGRAM_APP_ID to repository Actions secrets."; exit 1; }
+          test -n "$APP_HASH" || { echo "::error::Add TELEGRAM_APP_HASH to repository Actions secrets."; exit 1; }
+          test -n "$MAPS_V2_API" || { echo "::error::Add MAPS_V2_API to repository Actions secrets."; exit 1; }
+          test -n "$GODHEAD_GOOGLE_SERVICES_JSON" || { echo "::error::Add GODHEAD_GOOGLE_SERVICES_JSON for package com.godhead.messenger."; exit 1; }
+          case "$APP_ID" in *[!0-9]*|'') echo "::error::TELEGRAM_APP_ID must be numeric."; exit 1;; esac
+          printf '%s' "$GODHEAD_GOOGLE_SERVICES_JSON" > TMessagesProj/google-services.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("TMessagesProj/google-services.json").read_text())
+          clients = data.get("client", [])
+          package_names = {
+              item.get("client_info", {}).get("android_client_info", {}).get("package_name")
+              for item in clients
+          }
+          if "com.godhead.messenger" not in package_names:
+              raise SystemExit("Firebase config must contain Android package com.godhead.messenger")
+          PY
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: |
+          sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;4.0.0"
+
+      - name: Set up Python for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure API keys
+        env:
+          APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
+          APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+          MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
+        run: |
+          {
+            printf 'APP_ID=%s\n' "$APP_ID"
+            printf 'APP_HASH="%s"\n' "$APP_HASH"
+            printf 'MAPS_V2_API="%s"\n' "$MAPS_V2_API"
+          } > API_KEYS
+
+      - name: Build GODHEAD full ARM64 debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :TMessagesProj:assembleFullArm64Debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GODHEAD-full-arm64-debug
+          path: TMessagesProj/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
