@@ -42,6 +42,29 @@ class GodheadAccountRepository(
         return GodheadRealtimeClient(apiBaseUrl, token, listener).also { it.connect() }
     }
 
+    suspend fun openDirectConversation(targetUserId: Long): GodheadConversation =
+        api.openDirectConversation(requireAccessToken(), targetUserId)
+
+    suspend fun createGroupConversation(title: String, memberIds: List<Long>): GodheadConversation =
+        api.createGroupConversation(requireAccessToken(), title, memberIds)
+
+    suspend fun listConversations(limit: Int = 50): List<GodheadConversation> =
+        api.listConversations(requireAccessToken(), limit)
+
+    suspend fun sendMessage(conversationId: Long, content: String): GodheadMessage =
+        api.sendMessage(requireAccessToken(), conversationId, content)
+
+    suspend fun listMessages(
+        conversationId: Long,
+        beforeId: Long? = null,
+        limit: Int = 50
+    ): GodheadMessagePage =
+        api.listMessages(requireAccessToken(), conversationId, beforeId, limit)
+
+    private fun requireAccessToken(): String =
+        sessions.readAccessToken()
+            ?: throw IllegalStateException("No GODHEAD session is stored on this device")
+
     fun signOut() {
         sessions.clear()
     }
