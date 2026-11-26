@@ -45,6 +45,12 @@ class GodheadAccountRepository(
     suspend fun searchUsers(query: String, limit: Int = 8): List<GodheadPublicUser> =
         api.searchUsers(requireAccessToken(), query, limit)
 
+    suspend fun listSessions(): List<GodheadServerSession> =
+        api.listSessions(requireAccessToken())
+
+    suspend fun revokeSession(sessionId: Long) =
+        api.revokeSession(requireAccessToken(), sessionId)
+
     suspend fun openDirectConversation(targetUserId: Long): GodheadConversation =
         api.openDirectConversation(requireAccessToken(), targetUserId)
 
