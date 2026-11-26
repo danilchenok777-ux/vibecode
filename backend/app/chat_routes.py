@@ -243,6 +243,7 @@ def list_messages(
 def mark_conversation_read(
     conversation_id: int,
     payload: MarkConversationReadRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -258,6 +259,7 @@ def mark_conversation_read(
 
     state = db.get(ConversationReadState, (conversation_id, current_user.id))
     now = datetime.now(timezone.utc)
+    cursor_advanced = False
     if state is None:
         state = ConversationReadState(
             conversation_id=conversation_id,
@@ -268,6 +270,7 @@ def mark_conversation_read(
         db.add(state)
         try:
             db.commit()
+            cursor_advanced = True
         except IntegrityError:
             # Two devices can mark the same conversation as read at once.
             # Resolve the unique-key race by keeping the furthest read cursor.
@@ -282,6 +285,7 @@ def mark_conversation_read(
                 state.last_read_message_id = payload.last_read_message_id
                 state.updated_at = now
                 db.commit()
+                cursor_advanced = True
     elif (
         state.last_read_message_id is None
         or payload.last_read_message_id > state.last_read_message_id
@@ -290,14 +294,30 @@ def mark_conversation_read(
         state.last_read_message_id = payload.last_read_message_id
         state.updated_at = now
         db.commit()
+        cursor_advanced = True
 
     db.refresh(state)
-    return ConversationReadStateResponse(
+    result = ConversationReadStateResponse(
         conversation_id=state.conversation_id,
         user_id=state.user_id,
         last_read_message_id=state.last_read_message_id,
         updated_at=state.updated_at,
     )
+    if cursor_advanced:
+        recipients = db.scalars(
+            select(ConversationMember.user_id)
+            .where(ConversationMember.conversation_id == conversation_id)
+        ).all()
+        event = {
+            "type": "read.state.updated",
+            "data": jsonable_encoder(result),
+        }
+        background_tasks.add_task(
+            connection_manager.broadcast,
+            list(recipients),
+            event,
+        )
+    return result
 
 
 @router.get(
