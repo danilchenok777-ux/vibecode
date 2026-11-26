@@ -32,7 +32,7 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 
 - `POST /v1/auth/register` — register an account and return a short-lived access token.
 - `POST /v1/auth/login` — authenticate by email/password and create an independently revocable server-side session.
-- `POST /v1/auth/logout` — revoke the current access token on the server; copied tokens stop working too.
+- `POST /v1/auth/logout` — revoke the current access token on the server; copied tokens stop working too.\n- `GET /v1/auth/sessions` — list active sessions for the signed-in account and identify the current session without exposing token identifiers.\n- `DELETE /v1/auth/sessions/{session_id}` — remotely revoke one of the account's other active sessions.
 - `GET /v1/users/me` — retrieve the authenticated account.
 - `GET /v1/users/search?query=...` — search public usernames and display names; results never expose email addresses or password data.
 - `POST /v1/conversations/direct/{user_id}` — open or retrieve a unique private conversation.
