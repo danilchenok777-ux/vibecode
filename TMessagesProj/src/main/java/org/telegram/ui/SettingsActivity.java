@@ -74,6 +74,7 @@ import com.exteragram.messenger.utils.ui.tabs.MainTabsUiHelper;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.godhead.GodheadAccountActivity;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
 import org.telegram.messenger.BirthdayController;
@@ -611,7 +612,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         }
         subtitleView.setText(sb);
 
-        versionView.setText(AppUtils.getVersionText());
+        versionView.setText(AppUtils.getVersionText() + "\nBased on ExteraGram\nhttps://github.com/exteraSquad/exteraGram");
+        android.text.util.Linkify.addLinks(versionView, android.text.util.Linkify.WEB_URLS);
+        versionView.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
     }
 
 
@@ -853,6 +856,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         }
 
         items.add(SettingCell.Factory.of(-1, 0xFFE83030, 0xFFE83030, Theme.isCurrentThemeMonet() ? R.drawable.ic_foreground_solid : R.drawable.ic_foreground, getString(R.string.Preferences)));
+        items.add(SettingCell.Factory.of(28, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.GodheadAccountTitle), getString(R.string.GodheadAccountSubtitle)));
 
         items.add(UItem.asShadow(null));
 
@@ -994,6 +998,13 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             case -1:
                 presentSettingFragment(new MainPreferencesActivity());
                 break;
+            case 28: {
+                Activity parent = getParentActivity();
+                if (parent != null) {
+                    parent.startActivity(new Intent(parent, GodheadAccountActivity.class));
+                }
+                break;
+            }
             case 1:
                 presentSettingFragment(new UserInfoActivity());
                 break;

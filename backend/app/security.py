@@ -1,0 +1,45 @@
+from datetime import datetime, timedelta, timezone
+import jwt
+from pwdlib import PasswordHash
+from .config import get_settings
+
+_password_hash = PasswordHash.recommended()
+DUMMY_HASH = _password_hash.hash("not-a-real-user-password")
+
+
+def hash_password(password: str) -> str:
+    return _password_hash.hash(password)
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    return _password_hash.verify(password, encoded)
+
+
+def create_access_token(subject: str) -> tuple[str, int]:
+    settings = get_settings()
+    lifetime = settings.access_token_minutes * 60
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": subject,
+        "iat": now,
+        "exp": now + timedelta(seconds=lifetime),
+        "iss": "godhead-api",
+        "aud": "godhead-android",
+        "typ": "access",
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    return token, lifetime
+
+
+def decode_access_token(token: str) -> str:
+    payload = jwt.decode(
+        token,
+        get_settings().jwt_secret,
+        algorithms=["HS256"],
+        audience="godhead-android",
+        issuer="godhead-api",
+        options={"require": ["sub", "exp", "iat", "iss", "aud"]},
+    )
+    if payload.get("typ") != "access":
+        raise jwt.InvalidTokenError("Wrong token type")
+    return str(payload["sub"])
