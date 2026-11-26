@@ -11730,4 +11730,13 @@
     <string name="FpnvConsentSimSlot">SIM Slot</string>
     <string name="FpnvConsentSimSlotValue">SIM %1$d</string>
     <string name="FpnvConsentPhoneNumber">Phone Number</string>
+    <string name="GodheadManageSessions">Manage active sessions</string>
+    <string name="GodheadActiveSessions">Active GODHEAD sessions</string>
+    <string name="GodheadSessionsLoaded">Active sessions: %1$d</string>
+    <string name="GodheadNoSessions">No active sessions were returned.</string>
+    <string name="GodheadCurrentSession">This device · Session #%1$d</string>
+    <string name="GodheadSessionExpires">Expires: %1$s</string>
+    <string name="GodheadRemoteSession">Session #%1$d\nCreated: %2$s\nExpires: %3$s</string>
+    <string name="GodheadRevokeSession">Revoke</string>
+    <string name="GodheadSessionRevoked">Remote session revoked. That access token can no longer be used.</string>
 </resources>
