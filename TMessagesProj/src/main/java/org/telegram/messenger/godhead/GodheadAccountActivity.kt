@@ -32,6 +32,7 @@ class GodheadAccountActivity : Activity() {
     private lateinit var passwordField: EditText
     private lateinit var statusView: TextView
     private lateinit var actionButtons: List<Button>
+    private lateinit var sessionsContainer: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,7 +78,8 @@ class GodheadAccountActivity : Activity() {
         val profileButton = addButton(content, getString(R.string.GodheadCheckProfile))
         val signOutButton = addButton(content, getString(R.string.GodheadSignOut))
         val chatsButton = addButton(content, getString(R.string.GodheadOpenChats))
-        actionButtons = listOf(registerButton, loginButton, profileButton, signOutButton, chatsButton)
+        val sessionsButton = addButton(content, getString(R.string.GodheadManageSessions))
+        actionButtons = listOf(registerButton, loginButton, profileButton, signOutButton, chatsButton, sessionsButton)
 
         chatsButton.setOnClickListener {
             try {
@@ -96,6 +98,17 @@ class GodheadAccountActivity : Activity() {
             textSize = 14f
         }
         content.addView(statusView, spacedParams())
+
+        content.addView(TextView(this).apply {
+            text = getString(R.string.GodheadActiveSessions)
+            textSize = 18f
+        }, spacedParams())
+        sessionsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        content.addView(sessionsContainer, spacedParams())
+
+        sessionsButton.setOnClickListener { loadSessions() }
 
         registerButton.setOnClickListener {
             runRequest {
@@ -135,6 +148,91 @@ class GodheadAccountActivity : Activity() {
             runRequest {
                 repository().signOut()
                 getString(R.string.GodheadSignedOut)
+            }
+        }
+    }
+
+    private fun loadSessions() {
+        setBusy(true)
+        statusView.text = getString(R.string.GodheadWorking)
+        activityScope.launch {
+            try {
+                renderSessions(repository().listSessions())
+                statusView.text = getString(
+                    R.string.GodheadSessionsLoaded,
+                    sessionsContainer.childCount
+                )
+            } catch (error: Exception) {
+                statusView.text = error.message?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.GodheadRequestFailed)
+            } finally {
+                setBusy(false)
+            }
+        }
+    }
+
+    private fun renderSessions(sessions: List<GodheadRemoteSession>) {
+        sessionsContainer.removeAllViews()
+        if (sessions.isEmpty()) {
+            sessionsContainer.addView(TextView(this).apply {
+                text = getString(R.string.GodheadNoSessions)
+            }, spacedParams())
+            return
+        }
+
+        sessions.forEach { session ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+            val details = TextView(this).apply {
+                text = if (session.isCurrent) {
+                    getString(R.string.GodheadCurrentSession, session.id) +
+                        "\\n" + getString(R.string.GodheadSessionExpires, session.expiresAt)
+                } else {
+                    getString(
+                        R.string.GodheadRemoteSession,
+                        session.id,
+                        session.createdAt,
+                        session.expiresAt
+                    )
+                }
+                textSize = 13f
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+            }
+            row.addView(details, LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            ))
+
+            if (!session.isCurrent) {
+                val revokeButton = Button(this).apply {
+                    text = getString(R.string.GodheadRevokeSession)
+                    isAllCaps = false
+                    setOnClickListener { revokeSession(session.id) }
+                }
+                row.addView(revokeButton, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ))
+            }
+            sessionsContainer.addView(row, spacedParams())
+        }
+    }
+
+    private fun revokeSession(sessionId: Long) {
+        setBusy(true)
+        statusView.text = getString(R.string.GodheadWorking)
+        activityScope.launch {
+            try {
+                repository().revokeSession(sessionId)
+                renderSessions(repository().listSessions())
+                statusView.text = getString(R.string.GodheadSessionRevoked)
+            } catch (error: Exception) {
+                statusView.text = error.message?.takeIf { it.isNotBlank() }
+                    ?: getString(R.string.GodheadRequestFailed)
+            } finally {
+                setBusy(false)
             }
         }
     }
