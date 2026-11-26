@@ -276,7 +276,7 @@ def upload_conversation_attachment(
     if content_type not in ALLOWED_ATTACHMENT_TYPES:
         raise HTTPException(status_code=415, detail="This attachment content type is not supported")
 
-    size_bytes = file.size
+    size_bytes = getattr(file, "size", None)
     if size_bytes is None:
         file.file.seek(0, 2)
         size_bytes = file.file.tell()
