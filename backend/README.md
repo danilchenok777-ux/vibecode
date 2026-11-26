@@ -31,7 +31,8 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 ## HTTP API
 
 - `POST /v1/auth/register` — register an account and return a short-lived access token.
-- `POST /v1/auth/login` — authenticate by email/password.
+- `POST /v1/auth/login` — authenticate by email/password and create an independently revocable server-side session.
+- `POST /v1/auth/logout` — revoke the current access token on the server; copied tokens stop working too.
 - `GET /v1/users/me` — retrieve the authenticated account.
 - `POST /v1/conversations/direct/{user_id}` — open or retrieve a unique private conversation.
 - `POST /v1/conversations/groups` — create a group conversation.
@@ -42,8 +43,8 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 
 ## WebSocket
 
-Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Message creation remains on the authenticated HTTP endpoint.
+Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Message creation remains on the authenticated HTTP endpoint.
 
 ## Current production gaps
 
-WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation/revocation, device/session management, delivery/read receipts, moderation/abuse controls, attachments/object storage, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
+WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, device/session inventory and remote sign-out, delivery/read receipts, moderation/abuse controls, attachments/object storage, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
