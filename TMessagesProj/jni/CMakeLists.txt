@@ -375,5 +375,6 @@ target_link_options(${NATIVE_LIB} PRIVATE
 #            c)
 #endif()
 
-include(AndroidNdkModules)
+# NDK r29 retains cpufeatures sources but no longer provides the legacy helper.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/AndroidNdkModules.cmake")
 android_ndk_import_module_cpufeatures()
