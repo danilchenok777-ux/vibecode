@@ -61,3 +61,16 @@ def test_websocket_rejects_missing_token():
         with pytest.raises(Exception):
             with client.websocket_connect("/v1/ws"):
                 pass
+
+
+def test_websocket_rejects_a_revoked_session():
+    with TestClient(app) as client:
+        token, _ = register(client, "socket_revoked")
+        signed_out = client.post("/v1/auth/logout", headers=auth(token))
+        assert signed_out.status_code == 200
+
+        # The bearer token is cryptographically valid but no longer represents
+        # an active server-side session.
+        with pytest.raises(Exception):
+            with client.websocket_connect("/v1/ws", headers=auth(token)):
+                pass
