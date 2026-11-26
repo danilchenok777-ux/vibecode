@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
 
@@ -77,6 +77,12 @@ class ConversationMember(Base):
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (Index("ix_messages_conversation_id_id", "conversation_id", "id"),)
+    attachment: Mapped["Attachment | None"] = relationship(
+        "Attachment",
+        back_populates="message",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     conversation_id: Mapped[int] = mapped_column(
@@ -108,3 +114,26 @@ class ConversationReadState(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False
     )
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_attachments_message_id"),
+        UniqueConstraint("object_key", name="uq_attachments_object_key"),
+        Index("ix_attachments_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(), nullable=False
+    )
+    message: Mapped["Message"] = relationship("Message", back_populates="attachment")
