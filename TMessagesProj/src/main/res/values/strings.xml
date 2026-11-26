@@ -2,6 +2,25 @@
 <resources>
     <string name="AppName">GODHEAD</string>
     <string name="AppNameBeta">GODHEAD Beta</string>
+    <string name="GodheadAccountTitle">GODHEAD Account</string>
+    <string name="GodheadAccountSubtitle">Manage your separate GODHEAD identity</string>
+    <string name="GodheadServerUrl">GODHEAD API server URL</string>
+    <string name="GodheadEmail">Email</string>
+    <string name="GodheadUsername">Username</string>
+    <string name="GodheadDisplayName">Display name</string>
+    <string name="GodheadPassword">Password (12 characters minimum)</string>
+    <string name="GodheadCreateAccount">Create GODHEAD account</string>
+    <string name="GodheadSignIn">Sign in</string>
+    <string name="GodheadCheckProfile">Check account profile</string>
+    <string name="GodheadSignOut">Sign out from GODHEAD</string>
+    <string name="GodheadStatusIdle">GODHEAD account is separate from your Telegram account.</string>
+    <string name="GodheadWorking">Connecting to GODHEAD…</string>
+    <string name="GodheadAccountCreated">Account created: %1$s (@%2$s)</string>
+    <string name="GodheadSignedIn">Signed in as %1$s (@%2$s)</string>
+    <string name="GodheadProfileLoaded">%1$s (@%2$s) · %3$s</string>
+    <string name="GodheadSignedOut">Signed out from GODHEAD on this device.</string>
+    <string name="GodheadServerRequired">Enter your GODHEAD API server URL.</string>
+    <string name="GodheadRequestFailed">GODHEAD request failed.</string>
     <string name="LanguageName">English</string>
     <string name="English">English</string>
     <string name="LanguageNameInEnglish">English</string>

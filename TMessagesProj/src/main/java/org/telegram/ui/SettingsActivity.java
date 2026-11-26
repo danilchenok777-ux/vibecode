@@ -78,6 +78,7 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
 import org.telegram.messenger.BirthdayController;
 import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.godhead.GodheadAccountActivity;
 import org.telegram.messenger.ChatThemeController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
@@ -856,6 +857,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
         items.add(SettingCell.Factory.of(-1, 0xFFE83030, 0xFFE83030, Theme.isCurrentThemeMonet() ? R.drawable.ic_foreground_solid : R.drawable.ic_foreground, getString(R.string.Preferences)));
 
+        items.add(SettingCell.Factory.of(28, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.GodheadAccountTitle), getString(R.string.GodheadAccountSubtitle)));
+
         items.add(UItem.asShadow(null));
 
         final boolean walletAbove = getConnectionsManager().getCurrentTime() - 1791538462 < 4 * 7 * 24 * 60 * 60;
@@ -996,6 +999,13 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             case -1:
                 presentSettingFragment(new MainPreferencesActivity());
                 break;
+            case 28: {
+                Activity parent = getParentActivity();
+                if (parent != null) {
+                    parent.startActivity(new Intent(parent, GodheadAccountActivity.class));
+                }
+                break;
+            }
             case 1:
                 presentSettingFragment(new UserInfoActivity());
                 break;
