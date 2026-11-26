@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
     MessagePageResponse, MessageResponse,
 )
+from .chat_realtime import connection_manager
 
 router = APIRouter(prefix="/v1", tags=["messaging"])
 MAX_GROUP_MEMBERS = 200
@@ -178,6 +180,7 @@ def list_conversations(
 def send_message(
     conversation_id: int,
     payload: CreateMessageRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -195,6 +198,16 @@ def send_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+
+    recipients = db.scalars(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation.id)
+    ).all()
+    event = {
+        "type": "message.created",
+        "data": jsonable_encoder(_message_response(message)),
+    }
+    background_tasks.add_task(connection_manager.broadcast, list(recipients), event)
     return _message_response(message)
 
 
