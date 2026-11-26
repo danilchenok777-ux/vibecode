@@ -3,6 +3,7 @@ from typing import BinaryIO
 from urllib.parse import quote
 
 import boto3
+from botocore.config import Config
 
 from .config import get_settings
 
@@ -16,6 +17,7 @@ def _client(endpoint_url: str):
         region_name=settings.s3_region,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
+        config=Config(s3={"addressing_style": "path"}),
     )
 
 
