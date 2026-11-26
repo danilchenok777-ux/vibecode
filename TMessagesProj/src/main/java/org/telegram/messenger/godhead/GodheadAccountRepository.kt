@@ -65,8 +65,16 @@ class GodheadAccountRepository(
         sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
 
-    fun signOut() {
-        sessions.clear()
+    suspend fun signOut() {
+        val token = sessions.readAccessToken()
+        try {
+            if (token != null) {
+                api.logout(token)
+            }
+        } finally {
+            // Local sign-out must still complete if the device is offline.
+            sessions.clear()
+        }
     }
 
     fun hasLocalSession(): Boolean = sessions.readAccessToken() != null
