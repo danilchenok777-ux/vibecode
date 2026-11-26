@@ -311,7 +311,6 @@ def upload_conversation_attachment(
     db.add(message)
     try:
         db.commit()
-        db.refresh(message)
     except Exception:
         db.rollback()
         try:
@@ -320,6 +319,7 @@ def upload_conversation_attachment(
             logger.exception("Failed to remove an orphaned GODHEAD attachment object")
         raise
 
+    db.refresh(message)
     recipients = db.scalars(
         select(ConversationMember.user_id)
         .where(ConversationMember.conversation_id == conversation.id)
