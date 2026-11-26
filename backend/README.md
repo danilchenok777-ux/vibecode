@@ -49,7 +49,7 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 
 ## WebSocket
 
-Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Message creation remains on the authenticated HTTP endpoint.
+Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Advancing a member's read cursor emits a `read.state.updated` event to the same conversation. Message creation and read-cursor updates remain authenticated HTTP operations.
 
 ## Current production gaps
 
