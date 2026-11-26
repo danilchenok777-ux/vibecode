@@ -109,7 +109,22 @@ jobs:
             printf 'APP_ID=12345\n'
             printf 'APP_HASH="0123456789abcdef0123456789abcdef"\n'
             printf 'MAPS_V2_API="AIzaSyGODHEAD_COMPILE_ONLY_NOT_A_REAL_KEY"\n'
+            printf 'SIGNING_KEY_STORE_PASSWORD=godhead-ci-only\n'
+            printf 'SIGNING_KEY_ALIAS=godhead-ci\n'
+            printf 'SIGNING_KEY_PASSWORD=godhead-ci-only\n'
           } > API_KEYS
+
+          # The upstream debug variant uses its release signing configuration.
+          # Generate a disposable CI-only keystore; it is never committed or used for releases.
+          mkdir -p TMessagesProj/config
+          keytool -genkeypair -noprompt \
+            -keystore TMessagesProj/config/exteraGram.jks \
+            -storetype JKS \
+            -storepass godhead-ci-only \
+            -keypass godhead-ci-only \
+            -alias godhead-ci \
+            -keyalg RSA -keysize 2048 -validity 2 \
+            -dname "CN=GODHEAD CI,O=GODHEAD,C=US"
 
           mkdir -p TMessagesProj
           cat > TMessagesProj/google-services.json <<'EOF'
