@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from .config import get_settings
 from .database import Base, _engine
 from . import models  # noqa: F401
@@ -8,8 +11,8 @@ from .routes import router
 from .chat_routes import router as chat_router
 from .chat_realtime import connection_manager
 from .database import SessionLocal
-from .models import User
-from .security import decode_access_token
+from .models import AuthSession, User
+from .security import decode_access_token_claims
 import jwt
 
 
@@ -48,13 +51,25 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     try:
-        subject = decode_access_token(authorization[7:].strip())
-        user_id = int(subject)
-    except (jwt.PyJWTError, ValueError, TypeError):
+        claims = decode_access_token_claims(authorization[7:].strip())
+        user_id = int(claims["sub"])
+        token_id = claims["jti"]
+    except (jwt.PyJWTError, ValueError, TypeError, KeyError):
         await websocket.close(code=4401, reason="Invalid or expired access token")
         return
 
     with SessionLocal() as db:
+        active_session = db.scalar(
+            select(AuthSession).where(
+                AuthSession.jti == token_id,
+                AuthSession.user_id == user_id,
+                AuthSession.revoked_at.is_(None),
+                AuthSession.expires_at > datetime.now(timezone.utc),
+            )
+        )
+        if active_session is None:
+            await websocket.close(code=4401, reason="Session expired or revoked")
+            return
         if db.get(User, user_id) is None:
             await websocket.close(code=4401, reason="Account not found")
             return
