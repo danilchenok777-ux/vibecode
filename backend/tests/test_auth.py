@@ -142,3 +142,87 @@ def test_logout_revokes_only_the_current_access_session():
 def test_logout_requires_a_valid_access_session():
     with TestClient(app) as client:
         assert client.post("/v1/auth/logout").status_code == 401
+
+
+def test_active_sessions_can_be_listed_and_revoked_individually():
+    with TestClient(app) as client:
+        first_login = client.post("/v1/auth/register", json={
+            "email": "devices@example.com",
+            "username": "devices_user",
+            "password": "a-long-secure-password",
+            "display_name": "Devices User",
+        })
+        assert first_login.status_code == 201
+        first_token = first_login.json()["access_token"]
+
+        second_login = client.post("/v1/auth/login", json={
+            "email": "devices@example.com",
+            "password": "a-long-secure-password",
+        })
+        assert second_login.status_code == 200
+        second_token = second_login.json()["access_token"]
+
+        other_user = client.post("/v1/auth/register", json={
+            "email": "other@example.com",
+            "username": "other_devices",
+            "password": "a-long-secure-password",
+            "display_name": "Other User",
+        })
+        assert other_user.status_code == 201
+        other_token = other_user.json()["access_token"]
+
+        sessions_response = client.get(
+            "/v1/auth/sessions",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert sessions_response.status_code == 200
+        sessions = sessions_response.json()
+        assert len(sessions) == 2
+        current = [item for item in sessions if item["is_current"]]
+        remote = [item for item in sessions if not item["is_current"]]
+        assert len(current) == 1
+        assert len(remote) == 1
+        assert "jti" not in current[0]
+        assert "access_token" not in current[0]
+
+        remote_session_id = remote[0]["id"]
+        forbidden = client.delete(
+            f"/v1/auth/sessions/{remote_session_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert forbidden.status_code == 404
+
+        revoked = client.delete(
+            f"/v1/auth/sessions/{remote_session_id}",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert revoked.status_code == 200
+        assert revoked.json() == {
+            "revoked": True,
+            "session_id": remote_session_id,
+        }
+
+        remote_profile = client.get(
+            "/v1/users/me",
+            headers={"Authorization": f"Bearer {second_token}"},
+        )
+        assert remote_profile.status_code == 401
+
+        current_profile = client.get(
+            "/v1/users/me",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert current_profile.status_code == 200
+
+        remaining = client.get(
+            "/v1/auth/sessions",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert remaining.status_code == 200
+        assert len(remaining.json()) == 1
+        assert remaining.json()[0]["is_current"] is True
+
+
+def test_active_session_list_requires_authentication():
+    with TestClient(app) as client:
+        assert client.get("/v1/auth/sessions").status_code == 401
