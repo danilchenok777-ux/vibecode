@@ -42,7 +42,7 @@ jobs:
           test -f .gitmodules
           # The upstream QuickJS test262 corpus is intentionally not checked out.
           # All other recorded submodules must be present at their pinned commits.
-          if git submodule status --recursive | grep -E '^-|^+' | grep -v '/test262$'; then
+          if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ { print; bad=1 } END { exit bad }'; then
             echo "A required upstream submodule is missing or mismatched."
             exit 1
           fi
@@ -60,7 +60,7 @@ jobs:
           # Restore the already implemented GODHEAD API from its protected branch.
           git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
           git fetch --depth=1 godhead backup/backend-foundation
-          git archive FETCH_HEAD backend | tar -x
+          git archive FETCH_HEAD backend .github/workflows/android-build.yml | tar -x
 
           cat > README.md <<'EOF'
           # GODHEAD
