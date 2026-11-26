@@ -94,7 +94,7 @@ jobs:
           test -x "$CMAKE_ROOT/bin/cmake"
           "$CMAKE_ROOT/bin/cmake" --version
           # Gradle uses this external CMake root; Ninja is supplied by the SDK package.
-          printf 'cmake.dir=%s\\n' "$CMAKE_ROOT" >> local.properties
+          printf 'cmake.dir=%s\n' "$CMAKE_ROOT" >> local.properties
           echo "$CMAKE_ROOT/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
 
