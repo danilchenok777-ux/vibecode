@@ -49,7 +49,7 @@ jobs:
       - name: Initialize pinned upstream submodules
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive
+          git submodule update --init --recursive --depth=1 --jobs=4
           if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ && $2 !~ /\/test262$/ { print; bad=1 } END { exit bad }'; then
             echo "::error::A required pinned submodule is missing or mismatched."
             exit 1
