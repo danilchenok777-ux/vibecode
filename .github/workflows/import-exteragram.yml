@@ -42,7 +42,7 @@ jobs:
           test -f .gitmodules
           # The upstream QuickJS test262 corpus is intentionally not checked out.
           # All other recorded submodules must be present at their pinned commits.
-          if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ { print; bad=1 } END { exit bad }'; then
+          if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ && $2 !~ /\/test262$/ { print; bad=1 } END { exit bad }'; then
             echo "A required upstream submodule is missing or mismatched."
             exit 1
           fi
