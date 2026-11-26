@@ -408,6 +408,7 @@ class GodheadConversationsActivity : Activity() {
                     messageInput.text.toString()
                 )
                 appendMessage(message)
+                messageInput.text.clear()
                 markSelectedConversationRead(message.id)
                 refreshChats()
                 status.text = getString(R.string.GodheadAttachmentUploaded, metadata.filename)
