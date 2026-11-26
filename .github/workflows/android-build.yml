@@ -138,12 +138,12 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon --max-workers=2 \
             -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
-            :TMessagesProj:assembleFullArm64Debug
+            :TMessagesProj:assembleFullArm64Release
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GODHEAD-full-arm64-debug
+          name: GODHEAD-full-arm64-release
           path: TMessagesProj/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
