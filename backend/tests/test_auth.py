@@ -97,3 +97,48 @@ def test_user_search_requires_auth_and_returns_only_public_fields():
             headers={"Authorization": f"Bearer {bob_token}"},
         )
         assert too_short.status_code == 422
+
+
+def test_logout_revokes_only_the_current_access_session():
+    with TestClient(app) as client:
+        registered = client.post("/v1/auth/register", json={
+            "email": "session@example.com",
+            "username": "session_user",
+            "password": "a-long-secure-password",
+            "display_name": "Session User",
+        })
+        assert registered.status_code == 201
+        first_token = registered.json()["access_token"]
+
+        # A second login creates an independent session for the same account.
+        logged_in = client.post("/v1/auth/login", json={
+            "email": "session@example.com",
+            "password": "a-long-secure-password",
+        })
+        assert logged_in.status_code == 200
+        second_token = logged_in.json()["access_token"]
+        assert first_token != second_token
+
+        logged_out = client.post(
+            "/v1/auth/logout",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert logged_out.status_code == 200
+        assert logged_out.json() == {"revoked": True}
+
+        revoked_profile = client.get(
+            "/v1/users/me",
+            headers={"Authorization": f"Bearer {first_token}"},
+        )
+        assert revoked_profile.status_code == 401
+
+        other_session_profile = client.get(
+            "/v1/users/me",
+            headers={"Authorization": f"Bearer {second_token}"},
+        )
+        assert other_session_profile.status_code == 200
+
+
+def test_logout_requires_a_valid_access_session():
+    with TestClient(app) as client:
+        assert client.post("/v1/auth/logout").status_code == 401
