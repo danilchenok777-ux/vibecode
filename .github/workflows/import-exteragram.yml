@@ -59,94 +59,176 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java")
-          source = path.read_text(encoding="utf-8")
-          old = "        versionView.setText(AppUtils.getVersionText());"
-          new = """        versionView.setText(AppUtils.getVersionText() + "\\nBased on ExteraGram\\nhttps://github.com/exteraSquad/exteraGram");
-                  android.text.util.Linkify.addLinks(versionView, android.text.util.Linkify.WEB_URLS);
-                  versionView.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());"""
-          if old not in source:
-              raise SystemExit("Could not locate the Settings footer for required ExteraGram attribution.")
-          path.write_text(source.replace(old, new, 1), encoding="utf-8")
 
-          # Add a dedicated GODHEAD account entry to Android Settings.
+          # Keep the required upstream attribution in the existing Settings footer.
           settings_path = Path("TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java")
           settings = settings_path.read_text(encoding="utf-8")
+          old_footer = "        versionView.setText(AppUtils.getVersionText());"
+          new_footer = """        versionView.setText(AppUtils.getVersionText() + "\\nBased on ExteraGram\\nhttps://github.com/exteraSquad/exteraGram");
+                  android.text.util.Linkify.addLinks(versionView, android.text.util.Linkify.WEB_URLS);
+                  versionView.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());"""
+          if old_footer not in settings:
+              raise SystemExit("Could not locate the Settings footer for required ExteraGram attribution.")
+          settings = settings.replace(old_footer, new_footer, 1)
+
+          # Add the separate GODHEAD account row and click target to SettingsActivity.
+          settings_lines = settings.splitlines(keepends=True)
           godhead_import = "import org.telegram.messenger.godhead.GodheadAccountActivity;"
-          if godhead_import not in settings:
-              import_anchor = "import org.telegram.messenger.AndroidUtilities;"
-              if import_anchor not in settings:
+          if not any(godhead_import in line for line in settings_lines):
+              import_index = next(
+                  (i for i, line in enumerate(settings_lines)
+                   if "import org.telegram.messenger.AndroidUtilities;" in line),
+                  None
+              )
+              if import_index is None:
                   raise SystemExit("Could not locate AndroidUtilities import in SettingsActivity.")
-              settings = settings.replace(import_anchor, import_anchor + "\\n" + godhead_import, 1)
+              settings_lines.insert(import_index + 1, godhead_import + chr(10))
 
-          preferences_row = "        items.add(SettingCell.Factory.of(-1, 0xFFE83030, 0xFFE83030, Theme.isCurrentThemeMonet() ? R.drawable.ic_foreground_solid : R.drawable.ic_foreground, getString(R.string.Preferences)));\\n"
-          godhead_row = "        items.add(SettingCell.Factory.of(28, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.GodheadAccountTitle), getString(R.string.GodheadAccountSubtitle)));\\n"
-          if godhead_row not in settings:
-              if preferences_row not in settings:
+          godhead_row = "        items.add(SettingCell.Factory.of(28, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.GodheadAccountTitle), getString(R.string.GodheadAccountSubtitle)));"
+          if not any("SettingCell.Factory.of(28," in line for line in settings_lines):
+              pref_index = next(
+                  (i for i, line in enumerate(settings_lines)
+                   if "SettingCell.Factory.of(-1," in line and "R.string.Preferences" in line),
+                  None
+              )
+              if pref_index is None:
                   raise SystemExit("Could not locate Preferences row in SettingsActivity.")
-              settings = settings.replace(preferences_row, preferences_row + godhead_row, 1)
+              settings_lines.insert(pref_index + 1, godhead_row + chr(10))
 
-          click_case = """            case 28: {
-                  Activity parent = getParentActivity();
-                  if (parent != null) {
-                      parent.startActivity(new Intent(parent, GodheadAccountActivity.class));
-                  }
-                  break;
-              }
-          """
-          switch_marker = "            case -1:\\n                presentSettingFragment(new MainPreferencesActivity());\\n                break;\\n"
-          if "case 28:" not in settings:
-              if switch_marker not in settings:
+          if not any(line.strip() == "case 28: {" for line in settings_lines):
+              switch_index = next(
+                  (i for i, line in enumerate(settings_lines) if "switch (item.id)" in line),
+                  None
+              )
+              if switch_index is None:
                   raise SystemExit("Could not locate SettingsActivity click switch.")
-              settings = settings.replace(switch_marker, switch_marker + click_case, 1)
-          settings_path.write_text(settings, encoding="utf-8")
+              case_index = next(
+                  (i for i in range(switch_index + 1, len(settings_lines))
+                   if settings_lines[i].strip() == "case -1:"),
+                  None
+              )
+              if case_index is None:
+                  raise SystemExit("Could not locate default SettingsActivity click case.")
+              break_index = next(
+                  (i for i in range(case_index + 1, len(settings_lines))
+                   if settings_lines[i].strip() == "break;"),
+                  None
+              )
+              if break_index is None:
+                  raise SystemExit("Could not locate the end of the Preferences click case.")
+              click_lines = [
+                  "            case 28: {",
+                  "                Activity parent = getParentActivity();",
+                  "                if (parent != null) {",
+                  "                    parent.startActivity(new Intent(parent, GodheadAccountActivity.class));",
+                  "                }",
+                  "                break;",
+                  "            }",
+              ]
+              settings_lines[break_index + 1:break_index + 1] = [line + chr(10) for line in click_lines]
+          settings_path.write_text("".join(settings_lines), encoding="utf-8")
 
-          # Supply the default English strings used by the account screen.
+          # Add default English strings for the identity and chat screens.
           strings_path = Path("TMessagesProj/src/main/res/values/strings.xml")
           strings = strings_path.read_text(encoding="utf-8")
           if 'name="GodheadAccountTitle"' not in strings:
-              app_name_marker = '    <string name="AppNameBeta">GODHEAD Beta</string>\\n'
-              godhead_strings = """    <string name="GodheadAccountTitle">GODHEAD Account</string>
-              <string name="GodheadAccountSubtitle">Manage your separate GODHEAD identity</string>
-              <string name="GodheadServerUrl">GODHEAD API server URL</string>
-              <string name="GodheadEmail">Email</string>
-              <string name="GodheadUsername">Username</string>
-              <string name="GodheadDisplayName">Display name</string>
-              <string name="GodheadPassword">Password (12 characters minimum)</string>
-              <string name="GodheadCreateAccount">Create GODHEAD account</string>
-              <string name="GodheadSignIn">Sign in</string>
-              <string name="GodheadCheckProfile">Check account profile</string>
-              <string name="GodheadSignOut">Sign out from GODHEAD</string>
-              <string name="GodheadStatusIdle">GODHEAD account is separate from your Telegram account.</string>
-              <string name="GodheadWorking">Connecting to GODHEAD…</string>
-              <string name="GodheadAccountCreated">Account created: %1$s (@%2$s)</string>
-              <string name="GodheadSignedIn">Signed in as %1$s (@%2$s)</string>
-              <string name="GodheadProfileLoaded">%1$s (@%2$s) · %3$s</string>
-              <string name="GodheadSignedOut">Signed out from GODHEAD on this device.</string>
-              <string name="GodheadServerRequired">Enter your GODHEAD API server URL.</string>
-              <string name="GodheadRequestFailed">GODHEAD request failed.</string>
-          """
-              if app_name_marker not in strings:
+              string_lines = strings.splitlines(keepends=True)
+              app_name_index = next(
+                  (i for i, line in enumerate(string_lines)
+                   if 'name="AppNameBeta"' in line),
+                  None
+              )
+              if app_name_index is None:
                   raise SystemExit("Could not locate GODHEAD app name string marker.")
-              strings = strings.replace(app_name_marker, app_name_marker + godhead_strings, 1)
-              strings_path.write_text(strings, encoding="utf-8")
+              godhead_strings = [
+                  '<string name="GodheadAccountTitle">GODHEAD Account</string>',
+                  '<string name="GodheadAccountSubtitle">Manage your separate GODHEAD identity</string>',
+                  '<string name="GodheadServerUrl">GODHEAD API server URL</string>',
+                  '<string name="GodheadEmail">Email</string>',
+                  '<string name="GodheadUsername">Username</string>',
+                  '<string name="GodheadDisplayName">Display name</string>',
+                  '<string name="GodheadPassword">Password (12 characters minimum)</string>',
+                  '<string name="GodheadCreateAccount">Create GODHEAD account</string>',
+                  '<string name="GodheadSignIn">Sign in</string>',
+                  '<string name="GodheadCheckProfile">Check account profile</string>',
+                  '<string name="GodheadSignOut">Sign out from GODHEAD</string>',
+                  '<string name="GodheadStatusIdle">GODHEAD account is separate from your Telegram account.</string>',
+                  '<string name="GodheadWorking">Connecting to GODHEAD…</string>',
+                  '<string name="GodheadAccountCreated">Account created: %1$s (@%2$s)</string>',
+                  '<string name="GodheadSignedIn">Signed in as %1$s (@%2$s)</string>',
+                  '<string name="GodheadProfileLoaded">%1$s (@%2$s) · %3$s</string>',
+                  '<string name="GodheadSignedOut">Signed out from GODHEAD on this device.</string>',
+                  '<string name="GodheadServerRequired">Enter your GODHEAD API server URL.</string>',
+                  '<string name="GodheadRequestFailed">GODHEAD request failed.</string>',
+                  '<string name="GodheadOpenChats">Open GODHEAD chats</string>',
+                  '<string name="GodheadSignInRequired">Sign in to GODHEAD before opening chats.</string>',
+                  '<string name="GodheadChatsTitle">GODHEAD Chats</string>',
+                  '<string name="GodheadChatsStatus">Your GODHEAD conversations are separate from Telegram.</string>',
+                  '<string name="GodheadTargetUserId">User ID</string>',
+                  '<string name="GodheadOpenDirectChat">Open direct chat</string>',
+                  '<string name="GodheadGroupTitle">Group title</string>',
+                  '<string name="GodheadGroupMemberIds">Other member IDs</string>',
+                  '<string name="GodheadCreateGroup">Create group</string>',
+                  '<string name="GodheadConversationsHeader">Conversations</string>',
+                  '<string name="GodheadMessagesHeader">Messages</string>',
+                  '<string name="GodheadMessageInput">Write a message</string>',
+                  '<string name="GodheadSendMessage">Send</string>',
+                  '<string name="GodheadInvalidUserId">Enter a valid GODHEAD user ID.</string>',
+                  '<string name="GodheadChatOpened">Opened GODHEAD conversation #%1$d</string>',
+                  '<string name="GodheadNoConversations">No GODHEAD conversations yet.</string>',
+                  '<string name="GodheadNoMessages">No messages in this conversation yet.</string>',
+                  '<string name="GodheadDirectConversation">Direct conversation #%1$d</string>',
+                  '<string name="GodheadRealtimeConnected">GODHEAD realtime connected.</string>',
+                  '<string name="GodheadRealtimeDisconnected">GODHEAD realtime connection closed.</string>',
+                  '<string name="GodheadRealtimeFailed">GODHEAD realtime connection failed.</string>',
+                  '<string name="GodheadLoadingMessages">Loading GODHEAD messages…</string>',
+                  '<string name="GodheadSelectedConversation">Conversation #%1$d selected.</string>',
+                  '<string name="GodheadMessageFromYou">You</string>',
+                  '<string name="GodheadMessageFromUser">User #%1$d</string>',
+                  '<string name="GodheadChooseConversation">Choose a GODHEAD conversation first.</string>',
+              ]
+              string_lines[app_name_index + 1:app_name_index + 1] = [
+                  "    " + line + chr(10) for line in godhead_strings
+              ]
+              strings_path.write_text("".join(string_lines), encoding="utf-8")
 
-          # Register the screen as a private, non-exported Android activity.
+          # Register both screens as private, non-exported Android activities.
           manifest_path = Path("TMessagesProj/src/main/AndroidManifest.xml")
           manifest = manifest_path.read_text(encoding="utf-8")
+          manifest_lines = manifest.splitlines(keepends=True)
           if "org.telegram.messenger.godhead.GodheadAccountActivity" not in manifest:
-              app_close = "    </application>"
-              activity = """        <activity
-                  android:name="org.telegram.messenger.godhead.GodheadAccountActivity"
-                  android:exported="false"
-                  android:label="@string/GodheadAccountTitle"
-                  android:windowSoftInputMode="adjustResize" />
-
-          """
-              if app_close not in manifest:
+              app_close_index = next(
+                  (i for i, line in enumerate(manifest_lines)
+                   if line.strip() == "</application>"),
+                  None
+              )
+              if app_close_index is None:
                   raise SystemExit("Could not locate application close tag in AndroidManifest.xml.")
-              manifest = manifest.replace(app_close, activity + app_close, 1)
-              manifest_path.write_text(manifest, encoding="utf-8")
+              activity_lines = [
+                  "        <activity",
+                  '            android:name="org.telegram.messenger.godhead.GodheadAccountActivity"',
+                  '            android:exported="false"',
+                  '            android:label="@string/GodheadAccountTitle"',
+                  '            android:windowSoftInputMode="adjustResize" />',
+              ]
+              manifest_lines[app_close_index:app_close_index] = [
+                  line + chr(10) for line in activity_lines
+              ] + [chr(10)]
+          if "org.telegram.messenger.godhead.GodheadConversationsActivity" not in "".join(manifest_lines):
+              app_close_index = next(
+                  i for i, line in enumerate(manifest_lines) if line.strip() == "</application>"
+              )
+              activity_lines = [
+                  "        <activity",
+                  '            android:name="org.telegram.messenger.godhead.GodheadConversationsActivity"',
+                  '            android:exported="false"',
+                  '            android:label="@string/GodheadChatsTitle"',
+                  '            android:windowSoftInputMode="adjustResize" />',
+              ]
+              manifest_lines[app_close_index:app_close_index] = [
+                  line + chr(10) for line in activity_lines
+              ] + [chr(10)]
+          manifest_path.write_text("".join(manifest_lines), encoding="utf-8")
           PY
 
           cat > README.md <<'EOF'
