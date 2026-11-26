@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -77,16 +78,38 @@ async def websocket_endpoint(websocket: WebSocket):
     await connection_manager.connect(user_id, websocket)
     try:
         while True:
-            message = await websocket.receive_text()
+            # Re-check the server-side session periodically as well as on every
+            # client frame, so revocation takes effect on existing sockets too.
+            try:
+                message = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                message = None
+
+            with SessionLocal() as db:
+                still_active = db.scalar(
+                    select(AuthSession.id).where(
+                        AuthSession.jti == token_id,
+                        AuthSession.user_id == user_id,
+                        AuthSession.revoked_at.is_(None),
+                        AuthSession.expires_at > datetime.now(timezone.utc),
+                    )
+                ) is not None
+
+            if not still_active:
+                await websocket.close(code=4401, reason="Session expired or revoked")
+                break
+
             if message == "ping":
                 await websocket.send_json({"type": "pong"})
-            else:
+            elif message is not None:
                 await websocket.send_json({
                     "type": "error",
                     "code": "http_required",
                     "detail": "Send chat messages through the authenticated HTTP endpoint.",
                 })
     except WebSocketDisconnect:
+        pass
+    finally:
         await connection_manager.disconnect(user_id, websocket)
 
 
