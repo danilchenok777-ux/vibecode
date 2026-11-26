@@ -1,4 +1,5 @@
 package org.telegram.messenger.godhead
+import org.telegram.messenger.R
 
 import android.app.Activity
 import android.os.Bundle
