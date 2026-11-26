@@ -58,33 +58,55 @@ class GodheadConversationsActivity : Activity() {
         }
         root.addView(status, spacedParams())
 
-        val directRow = LinearLayout(this).apply {
+        val userSearchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val targetId = EditText(this).apply {
-            hint = getString(R.string.GodheadTargetUserId)
-            inputType = InputType.TYPE_CLASS_NUMBER
+        val userSearchInput = EditText(this).apply {
+            hint = getString(R.string.GodheadSearchUsersHint)
+            inputType = InputType.TYPE_CLASS_TEXT
             setSingleLine(true)
         }
-        directRow.addView(targetId, LinearLayout.LayoutParams(0, dp(52), 1f))
-        directRow.addView(Button(this).apply {
-            text = getString(R.string.GodheadOpenDirectChat)
+        val userSearchResults = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        userSearchRow.addView(userSearchInput, LinearLayout.LayoutParams(0, dp(52), 1f))
+        userSearchRow.addView(Button(this).apply {
+            text = getString(R.string.GodheadSearchUsers)
             setOnClickListener {
-                val id = targetId.text.toString().toLongOrNull()
-                if (id == null || id <= 0) {
-                    status.text = getString(R.string.GodheadInvalidUserId)
+                val query = userSearchInput.text.toString().trim()
+                if (query.removePrefix("@").length < 2) {
+                    status.text = getString(R.string.GodheadSearchUsersTooShort)
                 } else {
                     runTask {
-                        val chat = api.openDirectConversation(id)
-                        selectChat(chat)
-                        refreshChats()
-                        getString(R.string.GodheadChatOpened, chat.id)
+                        val matches = api.searchUsers(query)
+                        userSearchResults.removeAllViews()
+                        if (matches.isEmpty()) {
+                            userSearchResults.addView(TextView(this@GodheadConversationsActivity).apply {
+                                text = getString(R.string.GodheadNoUsersFound)
+                            }, spacedParams())
+                        }
+                        matches.forEach { candidate ->
+                            userSearchResults.addView(Button(this@GodheadConversationsActivity).apply {
+                                text = "${candidate.displayName} (@${candidate.username})"
+                                isAllCaps = false
+                                setOnClickListener {
+                                    runTask {
+                                        val chat = api.openDirectConversation(candidate.id)
+                                        selectChat(chat)
+                                        refreshChats()
+                                        getString(R.string.GodheadChatOpened, chat.id)
+                                    }
+                                }
+                            }, spacedParams())
+                        }
+                        getString(R.string.GodheadSearchUsersCount, matches.size)
                     }
                 }
             }
         }, wrapParams())
-        root.addView(directRow, spacedParams())
+        root.addView(userSearchRow, spacedParams())
+        root.addView(userSearchResults, spacedParams())
 
         val groupRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
