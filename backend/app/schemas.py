@@ -51,3 +51,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserResponse
+
+
+class AuthSessionResponse(BaseModel):
+    id: int
+    created_at: datetime
+    expires_at: datetime
+    is_current: bool
