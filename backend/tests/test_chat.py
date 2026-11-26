@@ -373,3 +373,117 @@ def test_attachment_upload_rejects_unsupported_and_oversized_files(monkeypatch):
         assert history.status_code == 200
         assert history.json()["items"] == []
 
+def test_message_delivery_acknowledgement_is_recipient_only_and_idempotent():
+    with TestClient(app) as client:
+        token_a, user_a = register(client, "delivery_sender")
+        token_b, user_b = register(client, "delivery_receiver")
+        token_c, _ = register(client, "delivery_outsider")
+
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+
+        sent = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_a),
+            json={"content": "Delivered to the recipient"},
+        )
+        assert sent.status_code == 201
+        message_id = sent.json()["id"]
+
+        sender_cannot_ack = client.post(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery",
+            headers=auth(token_a),
+        )
+        assert sender_cannot_ack.status_code == 409
+
+        outsider_cannot_ack = client.post(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery",
+            headers=auth(token_c),
+        )
+        assert outsider_cannot_ack.status_code == 404
+
+        acknowledged = client.post(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery",
+            headers=auth(token_b),
+        )
+        assert acknowledged.status_code == 200, acknowledged.text
+        assert acknowledged.json()["message_id"] == message_id
+        assert acknowledged.json()["user_id"] == user_b["id"]
+        assert acknowledged.json()["delivered_at"] is not None
+
+        # Repeated receipt from a second device is idempotent and preserves
+        # the original delivery timestamp.
+        acknowledged_again = client.post(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery",
+            headers=auth(token_b),
+        )
+        assert acknowledged_again.status_code == 200
+        assert acknowledged_again.json()["delivered_at"] == acknowledged.json()["delivered_at"]
+
+        states = client.get(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+            headers=auth(token_a),
+        )
+        assert states.status_code == 200
+        assert states.json() == [acknowledged.json()]
+
+        receiver_can_list = client.get(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+            headers=auth(token_b),
+        )
+        assert receiver_can_list.status_code == 200
+        assert receiver_can_list.json()[0]["user_id"] == user_b["id"]
+
+        outsider_cannot_list = client.get(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+            headers=auth(token_c),
+        )
+        assert outsider_cannot_list.status_code == 404
+
+        wrong_message = client.get(
+            f"/v1/conversations/{conversation_id}/messages/{message_id + 999}/delivery-states",
+            headers=auth(token_a),
+        )
+        assert wrong_message.status_code == 404
+
+
+def test_group_delivery_states_show_unacknowledged_members():
+    with TestClient(app) as client:
+        token_a, user_a = register(client, "delivery_group_owner")
+        token_b, user_b = register(client, "delivery_group_b")
+        token_c, user_c = register(client, "delivery_group_c")
+        group = client.post(
+            "/v1/conversations/groups",
+            headers=auth(token_a),
+            json={"title": "Delivery group", "member_ids": [user_b["id"], user_c["id"]]},
+        )
+        assert group.status_code == 201
+        conversation_id = group.json()["id"]
+        sent = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_a),
+            json={"content": "Group delivery"},
+        )
+        assert sent.status_code == 201
+        message_id = sent.json()["id"]
+
+        acknowledged = client.post(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery",
+            headers=auth(token_b),
+        )
+        assert acknowledged.status_code == 200
+
+        states = client.get(
+            f"/v1/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+            headers=auth(token_a),
+        )
+        assert states.status_code == 200
+        by_user = {item["user_id"]: item["delivered_at"] for item in states.json()}
+        assert set(by_user) == {user_b["id"], user_c["id"]}
+        assert by_user[user_b["id"]] is not None
+        assert by_user[user_c["id"]] is None
+

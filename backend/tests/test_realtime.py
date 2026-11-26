@@ -107,3 +107,35 @@ def test_websocket_broadcasts_read_cursor_updates_to_conversation_members():
             assert event["data"]["user_id"] == user_b["id"]
             assert event["data"]["last_read_message_id"] == sent.json()["id"]
 
+def test_websocket_broadcasts_delivery_acknowledgement_to_sender():
+    with TestClient(app) as client:
+        token_a, user_a = register(client, "delivery_event_sender")
+        token_b, user_b = register(client, "delivery_event_receiver")
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+
+        sent = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_a),
+            json={"content": "Confirm delivery"},
+        )
+        assert sent.status_code == 201
+
+        with client.websocket_connect("/v1/ws", headers=auth(token_a)) as websocket:
+            acknowledged = client.post(
+                f"/v1/conversations/{conversation_id}/messages/{sent.json()['id']}/delivery",
+                headers=auth(token_b),
+            )
+            assert acknowledged.status_code == 200, acknowledged.text
+
+            event = websocket.receive_json()
+            assert event["type"] == "message.delivered"
+            assert event["data"]["conversation_id"] == conversation_id
+            assert event["data"]["message_id"] == sent.json()["id"]
+            assert event["data"]["user_id"] == user_b["id"]
+            assert event["data"]["delivered_at"] is not None
+

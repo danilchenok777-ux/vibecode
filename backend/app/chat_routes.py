@@ -14,11 +14,12 @@ from sqlalchemy.orm import Session
 from .auth import get_current_user
 from .config import get_settings
 from .database import get_db
-from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, User
+from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, MessageDelivery, User
 from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
     MessagePageResponse, MessageResponse, MarkConversationReadRequest,
     ConversationReadStateResponse, AttachmentDownloadResponse, AttachmentResponse,
+    MessageDeliveryStateResponse,
 )
 from .chat_realtime import connection_manager
 from .storage import (
@@ -400,6 +401,119 @@ def list_messages(
         items=[_message_response(message) for message in page],
         next_before_id=next_before_id,
     )
+
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/delivery",
+    response_model=MessageDeliveryStateResponse,
+)
+def acknowledge_message_delivery(
+    conversation_id: int,
+    message_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    message = db.scalar(
+        select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found in this conversation")
+    if message.sender_id == current_user.id:
+        raise HTTPException(status_code=409, detail="The sender cannot acknowledge their own message")
+
+    delivery = db.get(MessageDelivery, (message_id, current_user.id))
+    created = False
+    if delivery is None:
+        delivery = MessageDelivery(
+            message_id=message_id,
+            user_id=current_user.id,
+            delivered_at=datetime.now(timezone.utc),
+        )
+        db.add(delivery)
+        try:
+            db.commit()
+            created = True
+        except IntegrityError:
+            # A realtime event and history sync can acknowledge the same message
+            # at almost the same time on separate devices. The first timestamp wins.
+            db.rollback()
+            delivery = db.get(MessageDelivery, (message_id, current_user.id))
+            if delivery is None:
+                raise
+
+    db.refresh(delivery)
+    result = MessageDeliveryStateResponse(
+        message_id=delivery.message_id,
+        user_id=delivery.user_id,
+        delivered_at=delivery.delivered_at,
+    )
+    if created:
+        event = {
+            "type": "message.delivered",
+            "data": {
+                "conversation_id": conversation_id,
+                **jsonable_encoder(result),
+            },
+        }
+        background_tasks.add_task(
+            connection_manager.broadcast,
+            [message.sender_id],
+            event,
+        )
+    return result
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+    response_model=list[MessageDeliveryStateResponse],
+)
+def list_message_delivery_states(
+    conversation_id: int,
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    message = db.scalar(
+        select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found in this conversation")
+
+    rows = db.execute(
+        select(
+            ConversationMember.user_id,
+            MessageDelivery.delivered_at,
+        )
+        .outerjoin(
+            MessageDelivery,
+            (MessageDelivery.message_id == message_id)
+            & (MessageDelivery.user_id == ConversationMember.user_id),
+        )
+        .where(
+            ConversationMember.conversation_id == conversation_id,
+            ConversationMember.user_id != message.sender_id,
+        )
+        .order_by(ConversationMember.user_id.asc())
+    ).all()
+    return [
+        MessageDeliveryStateResponse(
+            message_id=message_id,
+            user_id=row.user_id,
+            delivered_at=row.delivered_at,
+        )
+        for row in rows
+    ]
+
 
 @router.put(
     "/conversations/{conversation_id}/read",
