@@ -341,8 +341,8 @@ def test_attachment_upload_rejects_unsupported_and_oversized_files(monkeypatch):
     monkeypatch.setattr("app.chat_routes.upload_attachment_object", lambda *args, **kwargs: None)
 
     with TestClient(app) as client:
-        token_a, user_b = register(client, "media_limited_owner")
-        token_b, _ = register(client, "media_limited_member")
+        token_a, _ = register(client, "media_limited_owner")
+        token_b, user_b = register(client, "media_limited_member")
         opened = client.post(
             f"/v1/conversations/direct/{user_b['id']}",
             headers=auth(token_a),
