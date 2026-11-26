@@ -149,4 +149,26 @@ jobs:
           JAVA_TOOL_OPTIONS: -Xmx5g
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" :TMessagesProj:assembleFullArm64Debug
+          # Maven Central occasionally responds with HTTP 429 when many CI jobs
+          # resolve the same Kotlin/Android dependency graph concurrently.
+          for attempt in 1 2 3 4 5; do
+            set +e
+            ./gradlew --no-daemon --max-workers=2 --refresh-dependencies \
+              -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
+              :TMessagesProj:assembleFullArm64Debug 2>&1 | tee "$RUNNER_TEMP/gradle-build.log"
+            result=${PIPESTATUS[0]}
+            set -e
+            if [[ "$result" -eq 0 ]]; then
+              exit 0
+            fi
+            if ! grep -Eqi 'HTTP 429|status code 429|Too Many Requests|status code 5[0-9][0-9]' "$RUNNER_TEMP/gradle-build.log"; then
+              exit "$result"
+            fi
+            if [[ "$attempt" -eq 5 ]]; then
+              echo "::error::Dependency repositories kept rate-limiting the Android build after five attempts."
+              exit "$result"
+            fi
+            delay=$((attempt * 25))
+            echo "::warning::Dependency repository rate limit detected; retrying Gradle after ${delay}s (attempt $((attempt + 1))/5)."
+            sleep "$delay"
+          done
