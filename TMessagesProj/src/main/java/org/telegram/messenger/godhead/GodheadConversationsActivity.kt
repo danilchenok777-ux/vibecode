@@ -229,7 +229,7 @@ class GodheadConversationsActivity : Activity() {
                     )
                     appendMessage(item)
                     if (message.senderId != currentUserId) {
-                        scope.launch { markSelectedConversationRead(message.id) }
+                        scope.launch { markConversationRead(message.conversationId, message.id) }
                     }
                 }
                 refreshChats()
@@ -291,7 +291,7 @@ class GodheadConversationsActivity : Activity() {
                         text = getString(R.string.GodheadNoMessages)
                     }, spacedParams())
                 } else {
-                    markSelectedConversationRead(page.items.last().id)
+                    markConversationRead(chat.id, page.items.last().id)
                 }
                 refreshReadReceipts(chat.id)
                 messageScroll.post { messageScroll.fullScroll(ScrollView.FOCUS_DOWN) }
@@ -349,7 +349,7 @@ class GodheadConversationsActivity : Activity() {
                 val created = api.sendMessage(chatId, body)
                 messageInput.text.clear()
                 appendMessage(created)
-                markSelectedConversationRead(created.id)
+                markConversationRead(chatId, created.id)
                 refreshChats()
             } catch (error: Exception) {
                 status.text = error.message ?: getString(R.string.GodheadRequestFailed)
@@ -409,7 +409,7 @@ class GodheadConversationsActivity : Activity() {
                 )
                 appendMessage(message)
                 messageInput.text.clear()
-                markSelectedConversationRead(message.id)
+                markConversationRead(conversationId, message.id)
                 refreshChats()
                 status.text = getString(R.string.GodheadAttachmentUploaded, metadata.filename)
             } catch (error: Exception) {
@@ -498,26 +498,36 @@ class GodheadConversationsActivity : Activity() {
         }
     }
 
-    private suspend fun markSelectedConversationRead(messageId: Long) {
-        val chatId = selected?.id ?: return
+    private suspend fun markConversationRead(conversationId: Long, messageId: Long) {
+        if (selected?.id != conversationId) return
         try {
-            api.markConversationRead(chatId, messageId)
-            refreshReadReceipts(chatId)
+            api.markConversationRead(conversationId, messageId)
+            refreshReadReceipts(conversationId)
         } catch (error: Exception) {
-            status.text = error.message ?: getString(R.string.GodheadReadReceiptFailed)
+            if (selected?.id == conversationId) {
+                status.text = error.message ?: getString(R.string.GodheadReadReceiptFailed)
+            }
         }
     }
 
     private suspend fun refreshReadReceipts(conversationId: Long) {
-        val states = api.listConversationReadStates(conversationId)
-        if (selected?.id != conversationId) return
-        val summary = states.mapNotNull { state ->
-            state.lastReadMessageId?.let { getString(R.string.GodheadReadCursorEntry, state.userId, it) }
-        }
-        readReceipts.text = if (summary.isEmpty()) {
-            getString(R.string.GodheadReadReceiptsEmpty)
-        } else {
-            getString(R.string.GodheadReadReceiptsSummary, summary.joinToString(" · "))
+        try {
+            val states = api.listConversationReadStates(conversationId)
+            if (selected?.id != conversationId) return
+            val summary = states.mapNotNull { state ->
+                state.lastReadMessageId?.let {
+                    getString(R.string.GodheadReadCursorEntry, state.userId, it)
+                }
+            }
+            readReceipts.text = if (summary.isEmpty()) {
+                getString(R.string.GodheadReadReceiptsEmpty)
+            } else {
+                getString(R.string.GodheadReadReceiptsSummary, summary.joinToString(" · "))
+            }
+        } catch (_: Exception) {
+            if (selected?.id == conversationId) {
+                readReceipts.text = getString(R.string.GodheadReadReceiptFailed)
+            }
         }
     }
 
