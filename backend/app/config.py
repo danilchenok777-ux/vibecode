@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     access_token_minutes: int = 20
     cors_origins: str = "http://localhost:3000"
 
+    s3_endpoint_url: str = "http://127.0.0.1:9000"
+    s3_public_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
+    s3_bucket: str = "godhead-media"
+    s3_access_key: str = "godhead-dev-access"
+    s3_secret_key: str = "development-only-minio-secret"
+    s3_presign_ttl_seconds: int = 300
+
     @model_validator(mode="after")
     def validate_production_configuration(self):
         if self.env.lower() != "production":
@@ -34,6 +42,22 @@ class Settings(BaseSettings):
 
         if not 5 <= self.access_token_minutes <= 120:
             raise ValueError("GODHEAD_ACCESS_TOKEN_MINUTES must be between 5 and 120")
+
+        storage_secret = self.s3_secret_key.strip()
+        if (
+            len(storage_secret) < 32
+            or "development-only" in storage_secret.lower()
+            or self.s3_access_key == "godhead-dev-access"
+        ):
+            raise ValueError(
+                "Production object storage requires unique access credentials; do not use development defaults"
+            )
+
+        if not 60 <= self.s3_presign_ttl_seconds <= 900:
+            raise ValueError("GODHEAD_S3_PRESIGN_TTL_SECONDS must be between 60 and 900")
+
+        if not self.s3_bucket.strip():
+            raise ValueError("GODHEAD_S3_BUCKET cannot be blank")
 
         return self
 
