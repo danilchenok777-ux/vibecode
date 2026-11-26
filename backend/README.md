@@ -11,6 +11,8 @@ python -m venv .venv
 pip install -e ".[dev]"
 cp .env.example .env
 # Replace GODHEAD_JWT_SECRET with a unique random value.
+# Start the local object store for attachment testing.
+docker compose up -d minio minio-init
 uvicorn app.main:app --reload
 ```
 
