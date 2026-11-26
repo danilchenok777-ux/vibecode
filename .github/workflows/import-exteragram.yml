@@ -6,62 +6,92 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: godhead-upstream-import
+  cancel-in-progress: false
+
 jobs:
   import:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Check out GODHEAD bootstrap
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Preserve importer workflow
+      - name: Preserve GODHEAD project files
         run: |
           mkdir -p /tmp/godhead-bootstrap/.github/workflows
           cp .github/workflows/import-exteragram.yml /tmp/godhead-bootstrap/.github/workflows/
+          cp README.md /tmp/godhead-bootstrap/README.md
 
-      - name: Import upstream source and submodule references
+      - name: Clone ExteraGram with all submodules
+        run: |
+          git clone --branch main --recurse-submodules --shallow-submodules https://github.com/exteraSquad/exteraGram.git /tmp/exteragram
+          cd /tmp/exteragram
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          test -f settings.gradle
+          test -f gradlew
+          test -f TMessagesProj/build.gradle
+          test -f .gitmodules
+          if git submodule status --recursive | grep -E '^-|^\+'; then
+            echo "One or more upstream submodules are missing or mismatched."
+            exit 1
+          fi
+
+      - name: Apply GODHEAD identity without losing upstream build docs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REPOSITORY: ${{ github.repository }}
         run: |
-          git clone --recurse-submodules --shallow-submodules https://github.com/exteraSquad/exteraGram.git /tmp/exteragram
           cd /tmp/exteragram
-          git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
-          git push godhead HEAD:main --force
-
-      - name: Apply GODHEAD repository identity
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_REPOSITORY: ${{ github.repository }}
-        run: |
-          cd /tmp/exteragram
+          cp README.md UPSTREAM_README.md
           mkdir -p .github/workflows
           cp /tmp/godhead-bootstrap/.github/workflows/import-exteragram.yml .github/workflows/
           cat > README.md <<'EOF'
           # GODHEAD
 
-          GODHEAD is an Android client project based on the ExteraGram codebase.
+          GODHEAD is a full Android messaging platform built on the ExteraGram Android client codebase. This repository is the production project, not a demo or disposable prototype.
 
-          ## Upstream and licensing
+          ## Product requirements
 
-          - Upstream: https://github.com/exteraSquad/exteraGram
-          - License: GNU GPL v3 or later, with upstream additional terms.
-          - Keep all upstream copyright and license notices. The application must retain the required “Based on ExteraGram” attribution and upstream link in its About/legal information.
+          The target product includes real, tested implementations of:
+          - GODHEAD accounts, registration and authentication, profiles, sessions, and account security.
+          - Private and group chats, message delivery and synchronization, attachments, media, and search.
+          - Voice/video calls and reliable push notifications.
+          - GODHEAD-owned backend APIs, database, real-time transport, storage, and administration.
+          - GRAM balances, transaction history, payments, Premium entitlements, and auditable server-side accounting.
+          - Stickers, gifts, collections, crafting, and maps.
+          - Settings, privacy controls, localization, accessibility, and GODHEAD visual identity.
 
-          ## Build
+          Engineering may proceed in milestones, but do not ship a separate demo product, fake authentication, simulated payments, hard-coded success states, placeholder buttons, or screens that imply unavailable features are operational.
 
-          Read the upstream build instructions in this repository before building. The project requires its Git submodules, Android SDK/NDK, and locally supplied API/signing configuration. Never commit API credentials, keystores, or passwords.
+          ## Upstream, attribution, and licensing
 
-          ## Roadmap
+          - Android client upstream: https://github.com/exteraSquad/exteraGram
+          - License: GNU GPL v3 or later, subject to the upstream additional terms.
+          - The original upstream build instructions are preserved in [UPSTREAM_README.md](UPSTREAM_README.md).
+          - Preserve upstream copyright notices, author attributions, and all applicable license terms.
+          - The application About/legal information must retain the required “Based on ExteraGram” notice and link to the upstream repository.
+          - GODHEAD must be clearly presented as a distinct, independently developed product and must not imply endorsement by ExteraGram authors.
 
-          1. Import and verify the upstream Android project.
-          2. Establish a reproducible GODHEAD debug APK build.
-          3. Apply GODHEAD branding and package identity while preserving required notices.
-          4. Design and implement GODHEAD-owned backend services. Telegram-dependent networking and account flows remain upstream until deliberately replaced and tested.
+          ## Build and configuration
+
+          Follow [UPSTREAM_README.md](UPSTREAM_README.md) for the upstream toolchain and build tasks. The project requires its Git submodules, Android SDK/NDK, and locally supplied API/signing configuration. Never commit API credentials, signing keys, keystores, or passwords.
+
+          ## Architecture boundary
+
+          Imported Telegram/MTProto networking and Telegram-dependent services remain upstream functionality until a GODHEAD replacement is implemented, security-reviewed, tested, and deliberately enabled. Do not describe Telegram-dependent infrastructure as GODHEAD-owned.
+
+          ## Delivery standard
+
+          Every feature must have its real implementation, server-side validation where applicable, error handling, security controls, and automated tests. A milestone is complete only when its acceptance criteria pass; repository documentation must not claim unimplemented functionality is ready.
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md .github/workflows/import-exteragram.yml
-          git commit -m "chore: establish GODHEAD project identity"
-          git push godhead HEAD:main
+          git add -A
+          git commit -m "chore: import ExteraGram base and establish GODHEAD project"
+          git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
+          git push godhead HEAD:main --force
