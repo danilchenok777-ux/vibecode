@@ -2,6 +2,10 @@ name: Import ExteraGram base
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .godhead-import-trigger
 
 permissions:
   contents: write
@@ -114,4 +118,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore: import ExteraGram base and apply GODHEAD identity"
-          git push godhead HEAD:main --force
+          git push godhead HEAD:refs/heads/godhead-source-import --force
