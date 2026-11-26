@@ -40,12 +40,14 @@ jobs:
           test -f gradlew
           test -f TMessagesProj/build.gradle
           test -f .gitmodules
-          if git submodule status --recursive | grep -E '^-|^\+'; then
-            echo "One or more upstream submodules are missing or mismatched."
+          # The upstream QuickJS test262 corpus is intentionally not checked out.
+          # All other recorded submodules must be present at their pinned commits.
+          if git submodule status --recursive | grep -E '^-|^+' | grep -v '/test262$'; then
+            echo "A required upstream submodule is missing or mismatched."
             exit 1
           fi
 
-      - name: Apply GODHEAD identity without losing upstream build docs
+      - name: Apply GODHEAD identity and preserve backend
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REPOSITORY: ${{ github.repository }}
@@ -54,6 +56,12 @@ jobs:
           cp README.md UPSTREAM_README.md
           mkdir -p .github/workflows
           cp /tmp/godhead-bootstrap/.github/workflows/import-exteragram.yml .github/workflows/
+
+          # Restore the already implemented GODHEAD API from its protected branch.
+          git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
+          git fetch --depth=1 godhead backup/backend-foundation
+          git archive FETCH_HEAD backend | tar -x
+
           cat > README.md <<'EOF'
           # GODHEAD
 
@@ -93,9 +101,9 @@ jobs:
 
           Every feature must have its real implementation, server-side validation where applicable, error handling, security controls, and automated tests. A milestone is complete only when its acceptance criteria pass; repository documentation must not claim unimplemented functionality is ready.
           EOF
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore: import ExteraGram base and establish GODHEAD project"
-          git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
           git push godhead HEAD:main --force
