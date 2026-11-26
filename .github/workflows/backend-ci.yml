@@ -1,0 +1,71 @@
+name: GODHEAD backend checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test
+        env:
+          GODHEAD_DATABASE_URL: sqlite:///./test.db
+          GODHEAD_JWT_SECRET: ci-only-secret-not-for-production
+        run: pytest -q
+
+  migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: godhead_ci
+          POSTGRES_USER: godhead
+          POSTGRES_PASSWORD: godhead-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U godhead -d godhead_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install
+        run: pip install .
+      - name: Apply PostgreSQL migrations
+        env:
+          GODHEAD_ENV: production
+          GODHEAD_DATABASE_URL: postgresql+psycopg://godhead:godhead-ci-password@127.0.0.1:5432/godhead_ci
+          GODHEAD_JWT_SECRET: ci-only-secret-not-for-production
+        run: alembic upgrade head
