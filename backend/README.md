@@ -1,28 +1,49 @@
-# GODHEAD API — identity foundation
+# GODHEAD API
 
-This is the first real backend service in the GODHEAD repository. It implements account registration, password hashing, login, signed short-lived access tokens, and the authenticated current-user endpoint.
+The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, and live message events over WebSocket.
 
-## Run locally
+## Local development
 
 ```bash
 cd backend
 python -m venv .venv
-# Activate the environment, then:
+# Activate the virtual environment.
 pip install -e ".[dev]"
 cp .env.example .env
-# Set GODHEAD_JWT_SECRET to a unique random value in .env
+# Replace GODHEAD_JWT_SECRET with a unique random value.
 uvicorn app.main:app --reload
 ```
 
-Open `/docs` for the OpenAPI contract. Run tests with `pytest`.
+Development mode creates its local SQLite schema automatically. API docs are at `/docs`; run tests with `pytest -q`.
 
-## API
+## PostgreSQL deployment with Docker Compose
 
-- `POST /v1/auth/register` — create an account and return an access token
-- `POST /v1/auth/login` — authenticate with email and password
-- `GET /v1/users/me` — return the authenticated account
-- `GET /health/live` and `GET /health/ready` — process and database checks
+```bash
+cd backend
+cp .env.example .env
+# Set GODHEAD_JWT_SECRET and a long URL-safe POSTGRES_PASSWORD.
+docker compose up --build -d
+docker compose logs -f api
+```
 
-## Current limits — not production complete
+The API container waits for PostgreSQL, applies versioned Alembic migrations, then starts Uvicorn. PostgreSQL data persists in the `godhead_postgres_data` volume. Back up that volume/database before upgrades.
 
-This is a working starting service, not the complete GODHEAD backend. It currently uses a synchronous SQLAlchemy session and development-time schema creation. Before production: add Alembic migrations, PostgreSQL deployment configuration, distributed rate limiting, email verification, password reset, refresh-token rotation and revocation, session/device management, audit events, abuse monitoring, backup/restore, and security review. Do not expose it to the public internet with the development JWT secret or SQLite configuration.
+## HTTP API
+
+- `POST /v1/auth/register` — register an account and return a short-lived access token.
+- `POST /v1/auth/login` — authenticate by email/password.
+- `GET /v1/users/me` — retrieve the authenticated account.
+- `POST /v1/conversations/direct/{user_id}` — open or retrieve a unique private conversation.
+- `POST /v1/conversations/groups` — create a group conversation.
+- `GET /v1/conversations` — list the current user's conversations.
+- `POST /v1/conversations/{id}/messages` — send a text message.
+- `GET /v1/conversations/{id}/messages` — page through message history using `before_id`.
+- `GET /health/live` and `GET /health/ready` — process and database checks.
+
+## WebSocket
+
+Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Message creation remains on the authenticated HTTP endpoint.
+
+## Current production gaps
+
+WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation/revocation, device/session management, delivery/read receipts, moderation/abuse controls, attachments/object storage, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.

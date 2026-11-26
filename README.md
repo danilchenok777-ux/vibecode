@@ -1,40 +1,29 @@
 # GODHEAD
 
-GODHEAD is a full-featured Android communication platform being developed from the ExteraGram codebase.
+GODHEAD is an Android communication platform developed from the ExteraGram client codebase. This is the production project, not a demo or disposable prototype.
 
-## Product objective
+## Project structure
 
-Build one complete, production-oriented application. There is no separate demo or disposable prototype release, and user-facing features must not be represented as working until their real implementation and service integration are complete.
+- Android client: ExteraGram-derived Android application, rebranded with the GODHEAD application ID and name.
+- GODHEAD API: account registration, authentication, encrypted Android session storage, private/group conversation APIs, and message history.
+- Upstream build documentation: [UPSTREAM_README.md](UPSTREAM_README.md).
 
-## Core product scope
+## Product requirements
 
-- GODHEAD accounts, registration, authentication, profile and account security
-- One-to-one and group conversations, message delivery, attachments, media and search
-- Voice/video calling and push notifications
-- GODHEAD-owned backend, API, database, realtime transport and operational administration
-- GRAM balance and transactions, Premium subscriptions and entitlements
-- Stickers, gifts, collections, crafting and maps
-- Complete settings, privacy controls, localization and accessibility
-- GODHEAD visual identity across Android UI, launcher assets and About screens
+The complete product target includes independently operated GODHEAD accounts, private and group chats, attachments, media, search, voice/video calls, push notifications, GRAM balances and auditable transactions, Premium entitlements, stickers, gifts, collections, crafting, maps, privacy controls, localization and accessibility. Features must not be described as operational until their real implementation and service integration are complete.
 
-## Engineering approach
+## Upstream, attribution, and licensing
 
-Implementation proceeds in verifiable engineering stages toward the single complete product: upstream source integration, Android build configuration, application identity and UI, backend services, feature integration, security, automated tests, deployment and release validation. These stages are not separate demo products.
+- Android client upstream: https://github.com/exteraSquad/exteraGram
+- License: GNU GPL v3 or later, subject to the upstream additional terms.
+- Preserve upstream copyright notices, author attributions, and all applicable license terms.
+- The Settings footer retains a clickable “Based on ExteraGram” attribution and the upstream repository link.
+- GODHEAD is a distinct, independently developed product and is not endorsed by ExteraGram authors.
 
-Do not ship placeholder buttons, simulated transactions, fake authentication, hard-coded success states or nonfunctional feature screens as completed functionality. Clearly mark unfinished internal work and keep it out of release builds.
+## Build and configuration
 
-## Upstream and licensing
+Follow [UPSTREAM_README.md](UPSTREAM_README.md) for Android build prerequisites. Supply your own Telegram API ID/hash while Telegram MTProto remains in use, and your own Firebase configuration if Firebase-based upstream features remain enabled. Never commit API credentials, Firebase configuration, signing keys, keystores or passwords.
 
-- Upstream: https://github.com/exteraSquad/exteraGram
-- Preserve all upstream copyright, GPL and additional license notices and comply with the upstream terms when redistributing source or binaries.
-- Keep the required “Based on ExteraGram” attribution and upstream link in the application's About/legal information.
+## Service boundary
 
-## Security and infrastructure
-
-Never commit API secrets, signing keystores, passwords, production credentials or private user data. Use environment-specific configuration and secure secret storage. Telegram-dependent services must not be described as GODHEAD-owned until they have actually been replaced and verified.
-
-## Repository
-
-- Android application and product name: GODHEAD
-- GitHub repository: https://github.com/danilchenok777-ux/vibecode
-- Upstream codebase: ExteraGram
+Telegram/MTProto networking remains upstream functionality until a GODHEAD replacement is implemented, security-reviewed, tested and deliberately enabled. The GODHEAD identity endpoints are separate from Telegram account sessions.
