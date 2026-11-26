@@ -13,13 +13,13 @@ concurrency:
 jobs:
   assemble:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout source and submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Validate private build configuration
         env:
@@ -27,24 +27,66 @@ jobs:
           APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
           MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
           GODHEAD_GOOGLE_SERVICES_JSON: ${{ secrets.GODHEAD_GOOGLE_SERVICES_JSON }}
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.GODHEAD_SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_KEY_STORE_PASSWORD: ${{ secrets.GODHEAD_SIGNING_KEY_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.GODHEAD_SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.GODHEAD_SIGNING_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           test -n "$APP_ID" || { echo "::error::Add TELEGRAM_APP_ID to repository Actions secrets."; exit 1; }
           test -n "$APP_HASH" || { echo "::error::Add TELEGRAM_APP_HASH to repository Actions secrets."; exit 1; }
           test -n "$MAPS_V2_API" || { echo "::error::Add MAPS_V2_API to repository Actions secrets."; exit 1; }
           test -n "$GODHEAD_GOOGLE_SERVICES_JSON" || { echo "::error::Add GODHEAD_GOOGLE_SERVICES_JSON for package com.godhead.messenger."; exit 1; }
+          test -n "$SIGNING_KEYSTORE_BASE64" || { echo "::error::Add GODHEAD_SIGNING_KEYSTORE_BASE64."; exit 1; }
+          test -n "$SIGNING_KEY_STORE_PASSWORD" || { echo "::error::Add GODHEAD_SIGNING_KEY_STORE_PASSWORD."; exit 1; }
+          test -n "$SIGNING_KEY_ALIAS" || { echo "::error::Add GODHEAD_SIGNING_KEY_ALIAS."; exit 1; }
+          test -n "$SIGNING_KEY_PASSWORD" || { echo "::error::Add GODHEAD_SIGNING_KEY_PASSWORD."; exit 1; }
           case "$APP_ID" in *[!0-9]*|'') echo "::error::TELEGRAM_APP_ID must be numeric."; exit 1;; esac
+          mkdir -p TMessagesProj/config
           printf '%s' "$GODHEAD_GOOGLE_SERVICES_JSON" > TMessagesProj/google-services.json
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > TMessagesProj/config/exteraGram.jks
+          test -s TMessagesProj/config/exteraGram.jks
           python3 - <<'PY'
           import json
           from pathlib import Path
-          data = json.loads(Path("TMessagesProj/google-services.json").read_text())
-          clients = data.get("client", [])
-          package_names = {
-              item.get("client_info", {}).get("android_client_info", {}).get("package_name")
-              for item in clients
+          data = json.loads(Path("TMessagesProj/google-services.json").read_text(encoding="utf-8"))
+          packages = {
+              client.get("client_info", {}).get("android_client_info", {}).get("package_name")
+              for client in data.get("client", [])
           }
-          if "com.godhead.messenger" not in package_names:
+          if "com.godhead.messenger" not in packages:
               raise SystemExit("Firebase config must contain Android package com.godhead.messenger")
+          PY
+
+          export GODHEAD_APP_ID="$APP_ID"
+          export GODHEAD_APP_HASH="$APP_HASH"
+          export GODHEAD_MAPS_API="$MAPS_V2_API"
+          export GODHEAD_STORE_PASSWORD="$SIGNING_KEY_STORE_PASSWORD"
+          export GODHEAD_KEY_ALIAS="$SIGNING_KEY_ALIAS"
+          export GODHEAD_KEY_PASSWORD="$SIGNING_KEY_PASSWORD"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          values = {
+              "APP_ID": os.environ["GODHEAD_APP_ID"],
+              "APP_HASH": f'"{os.environ["GODHEAD_APP_HASH"]}"',
+              "MAPS_V2_API": f'"{os.environ["GODHEAD_MAPS_API"]}"',
+              "SIGNING_KEY_STORE_PASSWORD": os.environ["GODHEAD_STORE_PASSWORD"],
+              "SIGNING_KEY_ALIAS": os.environ["GODHEAD_KEY_ALIAS"],
+              "SIGNING_KEY_PASSWORD": os.environ["GODHEAD_KEY_PASSWORD"],
+          }
+          def escape(value: str) -> str:
+              if "\n" in value or "\r" in value:
+                  raise SystemExit("Build secrets must not contain newline characters")
+              return (value.replace("\\", "\\\\")
+                           .replace(":", "\\:")
+                           .replace("=", "\\=")
+                           .replace("\t", "\\t"))
+          Path("API_KEYS").write_text(
+              "".join(f"{key}={escape(value)}\n" for key, value in values.items()),
+              encoding="utf-8",
+          )
           PY
 
       - name: Set up JDK
@@ -56,33 +98,49 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android build packages
+      - name: Install pinned Android build packages
         run: |
-          sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;4.0.0"
+          yes | sdkmanager --licenses
+          sdkmanager --install --channel=3 \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865" \
+            "cmake;3.22.1"
+          if [[ -d "$ANDROID_HOME/platforms/android-37.0" && ! -e "$ANDROID_HOME/platforms/android-37" ]]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
+          test -d "$ANDROID_HOME/platforms/android-37"
+          test -x "$ANDROID_HOME/cmake/3.22.1/bin/ninja"
+
+      - name: Install CMake 4.x required by the native client
+        run: |
+          CMAKE_ARCHIVE="$RUNNER_TEMP/cmake-4.5.1-linux-x86_64.tar.gz"
+          CMAKE_ROOT="$RUNNER_TEMP/cmake-4.5.1-linux-x86_64"
+          curl --fail --location --silent --show-error \
+            "https://github.com/Kitware/CMake/releases/download/v4.5.1/cmake-4.5.1-linux-x86_64.tar.gz" \
+            --output "$CMAKE_ARCHIVE"
+          echo "83b71181fb62b4fe8f26067a9321448572e7a43bd04ff6c7f54a24c33698f16d  $CMAKE_ARCHIVE" | sha256sum --check
+          tar -xzf "$CMAKE_ARCHIVE" -C "$RUNNER_TEMP"
+          test -x "$CMAKE_ROOT/bin/cmake"
+          printf 'cmake.dir=%s\n' "$CMAKE_ROOT" >> local.properties
+          echo "$CMAKE_ROOT/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
 
       - name: Set up Python for Chaquopy
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Configure API keys
-        env:
-          APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
-          APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
-          MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
-        run: |
-          {
-            printf 'APP_ID=%s\n' "$APP_ID"
-            printf 'APP_HASH="%s"\n' "$APP_HASH"
-            printf 'MAPS_V2_API="%s"\n' "$MAPS_V2_API"
-          } > API_KEYS
-
       - name: Build GODHEAD full ARM64 debug APK
+        env:
+          JAVA_TOOL_OPTIONS: -Xmx5g
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :TMessagesProj:assembleFullArm64Debug
+          ./gradlew --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
+            :TMessagesProj:assembleFullArm64Debug
 
-      - name: Upload APK artifact
+      - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: GODHEAD-full-arm64-debug
