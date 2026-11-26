@@ -33,6 +33,13 @@ data class GodheadPublicUser(
     val displayName: String
 )
 
+data class GodheadServerSession(
+    val id: Long,
+    val createdAt: String,
+    val expiresAt: String,
+    val isCurrent: Boolean
+)
+
 data class GodheadMessage(
     val id: Long,
     val conversationId: Long,
@@ -115,6 +122,35 @@ class GodheadApiClient(baseUrl: String) {
             .header("Accept", "application/json")
             .header("Authorization", "Bearer $accessToken")
             .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val response = execute(request)
+        if (!response.optBoolean("revoked")) {
+            throw IOException("GODHEAD did not confirm session revocation")
+        }
+    }
+
+    suspend fun listSessions(accessToken: String): List<GodheadServerSession> {
+        val request = authorizedRequest("v1/auth/sessions", accessToken)
+            .get()
+            .build()
+        val sessions = executeArray(request)
+        return buildList(sessions.length()) {
+            for (index in 0 until sessions.length()) {
+                val item = sessions.getJSONObject(index)
+                add(GodheadServerSession(
+                    id = item.getLong("id"),
+                    createdAt = item.getString("created_at"),
+                    expiresAt = item.getString("expires_at"),
+                    isCurrent = item.optBoolean("is_current")
+                ))
+            }
+        }
+    }
+
+    suspend fun revokeSession(accessToken: String, sessionId: Long) {
+        require(sessionId > 0) { "Session ID must be positive" }
+        val request = authorizedRequest("v1/auth/sessions/$sessionId", accessToken)
+            .delete()
             .build()
         val response = execute(request)
         if (!response.optBoolean("revoked")) {
