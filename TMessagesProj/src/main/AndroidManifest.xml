@@ -683,6 +683,12 @@
             android:label="@string/GodheadAccountTitle"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name="org.telegram.messenger.godhead.GodheadConversationsActivity"
+            android:exported="false"
+            android:label="@string/GodheadChatsTitle"
+            android:windowSoftInputMode="adjustResize" />
+
     </application>
 
 </manifest>

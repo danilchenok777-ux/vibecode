@@ -1,6 +1,7 @@
 package org.telegram.messenger.godhead
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
@@ -74,7 +75,20 @@ class GodheadAccountActivity : Activity() {
         val loginButton = addButton(content, getString(R.string.GodheadSignIn))
         val profileButton = addButton(content, getString(R.string.GodheadCheckProfile))
         val signOutButton = addButton(content, getString(R.string.GodheadSignOut))
-        actionButtons = listOf(registerButton, loginButton, profileButton, signOutButton)
+        val chatsButton = addButton(content, getString(R.string.GodheadOpenChats))
+        actionButtons = listOf(registerButton, loginButton, profileButton, signOutButton, chatsButton)
+
+        chatsButton.setOnClickListener {
+            try {
+                if (repository().hasLocalSession()) {
+                    startActivity(Intent(this, GodheadConversationsActivity::class.java))
+                } else {
+                    statusView.text = getString(R.string.GodheadSignInRequired)
+                }
+            } catch (error: Exception) {
+                statusView.text = error.message ?: getString(R.string.GodheadRequestFailed)
+            }
+        }
 
         statusView = TextView(this).apply {
             text = getString(R.string.GodheadStatusIdle)
