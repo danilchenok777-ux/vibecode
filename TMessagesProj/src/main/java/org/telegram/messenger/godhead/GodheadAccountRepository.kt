@@ -64,6 +64,37 @@ class GodheadAccountRepository(
     ): GodheadMessagePage =
         api.listMessages(requireAccessToken(), conversationId, beforeId, limit)
 
+    suspend fun uploadAttachment(
+        conversationId: Long,
+        filename: String,
+        contentType: String,
+        bytes: ByteArray,
+        caption: String = ""
+    ): GodheadMessage =
+        api.uploadAttachment(
+            requireAccessToken(),
+            conversationId,
+            filename,
+            contentType,
+            bytes,
+            caption
+        )
+
+    suspend fun createAttachmentDownload(
+        conversationId: Long,
+        attachmentId: Long
+    ): GodheadAttachmentDownload =
+        api.createAttachmentDownload(requireAccessToken(), conversationId, attachmentId)
+
+    suspend fun markConversationRead(
+        conversationId: Long,
+        lastReadMessageId: Long
+    ): GodheadReadState =
+        api.markConversationRead(requireAccessToken(), conversationId, lastReadMessageId)
+
+    suspend fun listConversationReadStates(conversationId: Long): List<GodheadReadState> =
+        api.listConversationReadStates(requireAccessToken(), conversationId)
+
     private fun requireAccessToken(): String =
         sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
