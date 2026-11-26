@@ -46,6 +46,8 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, wa
 - `GET /v1/conversations/{id}/messages` — page through message history using `before_id`.
 - `PUT /v1/conversations/{id}/read` — advance the current member's read cursor to a message in that conversation.
 - `GET /v1/conversations/{id}/read-states` — list each member's read cursor. A null cursor means that member has not marked any message as read.
+- `POST /v1/conversations/{id}/messages/{message_id}/delivery` — the recipient records that a message reached an authenticated client. The sender cannot acknowledge their own message; repeated acknowledgements are idempotent.
+- `GET /v1/conversations/{id}/messages/{message_id}/delivery-states` — list each recipient's delivery timestamp; a null timestamp means no recipient acknowledgement has arrived yet.
 - `POST /v1/conversations/{id}/attachments` — upload a file and create a message containing its metadata. Maximum file size is 25 MiB; MIME types are allow-listed.
 - `GET /v1/conversations/{id}/attachments/{attachment_id}/download` — obtain a short-lived signed download URL after conversation-membership validation.
 
@@ -54,8 +56,8 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, wa
 
 ## WebSocket
 
-Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. Advancing a member's read cursor emits a `read.state.updated` event to the same conversation. Message creation and read-cursor updates remain authenticated HTTP operations.
+Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. A recipient's first delivery acknowledgement emits a `message.delivered` event to the sender. Advancing a member's read cursor emits a `read.state.updated` event to the same conversation. Message creation, delivery acknowledgements and read-cursor updates remain authenticated HTTP operations.
 
 ## Current production gaps
 
-WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, per-message delivery acknowledgements, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
+WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
