@@ -1,14 +1,28 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .auth import get_current_user
 from .database import get_db
-from .models import User
+from .models import AuthSession, User
 from .schemas import LoginRequest, PublicUserResponse, RegisterRequest, TokenResponse, UserResponse
 from .security import DUMMY_HASH, create_access_token, hash_password, verify_password
+from .auth import get_current_auth_session
 
 router = APIRouter(prefix="/v1")
+
+
+def _issue_session(user: User, db: Session) -> TokenResponse:
+    token, lifetime, token_id = create_access_token(str(user.id))
+    db.add(AuthSession(
+        jti=token_id,
+        user_id=user.id,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=lifetime),
+    ))
+    db.commit()
+    return TokenResponse(access_token=token, expires_in=lifetime, user=user)
 
 
 @router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -28,8 +42,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Email or username is already registered")
-    token, lifetime = create_access_token(str(user.id))
-    return TokenResponse(access_token=token, expires_in=lifetime, user=user)
+    return _issue_session(user, db)
 
 
 @router.post("/auth/login", response_model=TokenResponse)
@@ -39,8 +52,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     valid = verify_password(payload.password, encoded)
     if user is None or not valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    token, lifetime = create_access_token(str(user.id))
-    return TokenResponse(access_token=token, expires_in=lifetime, user=user)
+    return _issue_session(user, db)
 
 
 @router.get("/users/me", response_model=UserResponse)
@@ -79,3 +91,16 @@ def search_users(
         PublicUserResponse(id=user.id, username=user.username, display_name=user.display_name)
         for user in matches
     ]
+
+
+
+@router.post("/auth/logout", status_code=status.HTTP_200_OK)
+def logout(
+    session: AuthSession = Depends(get_current_auth_session),
+    db: Session = Depends(get_db),
+):
+    # Revoking this token server-side invalidates any copied bearer token too.
+    if session.revoked_at is None:
+        session.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+    return {"revoked": True}
