@@ -27,6 +27,12 @@ data class GodheadAuthSession(
     val user: GodheadUser
 )
 
+data class GodheadPublicUser(
+    val id: Long,
+    val username: String,
+    val displayName: String
+)
+
 data class GodheadMessage(
     val id: Long,
     val conversationId: Long,
@@ -102,6 +108,20 @@ class GodheadApiClient(baseUrl: String) {
         return authRequest("v1/auth/login", payload)
     }
 
+    suspend fun logout(accessToken: String) {
+        require(accessToken.isNotBlank()) { "Access token is required" }
+        val request = Request.Builder()
+            .url(baseUrl + "v1/auth/logout")
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $accessToken")
+            .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        val response = execute(request)
+        if (!response.optBoolean("revoked")) {
+            throw IOException("GODHEAD did not confirm session revocation")
+        }
+    }
+
     suspend fun currentUser(accessToken: String): GodheadUser {
         require(accessToken.isNotBlank()) { "Access token is required" }
         val request = Request.Builder()
@@ -111,6 +131,38 @@ class GodheadApiClient(baseUrl: String) {
             .get()
             .build()
         return parseUser(execute(request))
+    }
+
+    suspend fun searchUsers(
+        accessToken: String,
+        query: String,
+        limit: Int = 8
+    ): List<GodheadPublicUser> {
+        val normalized = query.trim().removePrefix("@")
+        require(normalized.length in 2..64) { "Search must contain between 2 and 64 characters" }
+        require(limit in 1..50) { "User search limit must be between 1 and 50" }
+        val url = baseUrl.toHttpUrl().newBuilder()
+            .addPathSegments("v1/users/search")
+            .addQueryParameter("query", normalized)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+        val results = executeArray(request)
+        return buildList(results.length()) {
+            for (index in 0 until results.length()) {
+                val user = results.getJSONObject(index)
+                add(GodheadPublicUser(
+                    id = user.getLong("id"),
+                    username = user.getString("username"),
+                    displayName = user.getString("display_name")
+                ))
+            }
+        }
     }
 
     suspend fun openDirectConversation(accessToken: String, targetUserId: Long): GodheadConversation {

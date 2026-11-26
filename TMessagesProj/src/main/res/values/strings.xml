@@ -25,6 +25,11 @@
     <string name="GodheadSignInRequired">Sign in to GODHEAD before opening chats.</string>
     <string name="GodheadChatsTitle">GODHEAD Chats</string>
     <string name="GodheadChatsStatus">Your GODHEAD conversations are separate from Telegram.</string>
+    <string name="GodheadSearchUsersHint">Search by username or name</string>
+    <string name="GodheadSearchUsers">Search</string>
+    <string name="GodheadSearchUsersTooShort">Enter at least 2 characters to search.</string>
+    <string name="GodheadNoUsersFound">No GODHEAD users found.</string>
+    <string name="GodheadSearchUsersCount">Found %1$d GODHEAD users.</string>
     <string name="GodheadTargetUserId">User ID</string>
     <string name="GodheadOpenDirectChat">Open direct chat</string>
     <string name="GodheadGroupTitle">Group title</string>

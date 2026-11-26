@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.telegram.messenger.BuildConfig
+import org.telegram.messenger.R
 import kotlinx.coroutines.launch
 
 /**

@@ -19,6 +19,27 @@ class User(Base):
     )
 
 
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        UniqueConstraint("jti", name="uq_auth_sessions_jti"),
+        Index("ix_auth_sessions_user_id", "user_id"),
+        Index("ix_auth_sessions_expires_at", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jti: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(), nullable=False
+    )
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
