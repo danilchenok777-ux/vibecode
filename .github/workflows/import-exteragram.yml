@@ -72,12 +72,12 @@ jobs:
           # Add a dedicated GODHEAD account entry to Android Settings.
           settings_path = Path("TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java")
           settings = settings_path.read_text(encoding="utf-8")
-          build_vars_import = "import org.telegram.messenger.BuildVars;\\n"
-          godhead_import = "import org.telegram.messenger.godhead.GodheadAccountActivity;\\n"
+          godhead_import = "import org.telegram.messenger.godhead.GodheadAccountActivity;"
           if godhead_import not in settings:
-              if build_vars_import not in settings:
-                  raise SystemExit("Could not locate BuildVars import in SettingsActivity.")
-              settings = settings.replace(build_vars_import, build_vars_import + godhead_import, 1)
+              import_anchor = "import org.telegram.messenger.AndroidUtilities;"
+              if import_anchor not in settings:
+                  raise SystemExit("Could not locate AndroidUtilities import in SettingsActivity.")
+              settings = settings.replace(import_anchor, import_anchor + "\\n" + godhead_import, 1)
 
           preferences_row = "        items.add(SettingCell.Factory.of(-1, 0xFFE83030, 0xFFE83030, Theme.isCurrentThemeMonet() ? R.drawable.ic_foreground_solid : R.drawable.ic_foreground, getString(R.string.Preferences)));\\n"
           godhead_row = "        items.add(SettingCell.Factory.of(28, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.GodheadAccountTitle), getString(R.string.GodheadAccountSubtitle)));\\n"
