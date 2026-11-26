@@ -64,6 +64,12 @@ class GodheadAccountRepository(
     ): GodheadMessagePage =
         api.listMessages(requireAccessToken(), conversationId, beforeId, limit)
 
+    suspend fun listSessions(): List<GodheadRemoteSession> =
+        api.listSessions(requireAccessToken())
+
+    suspend fun revokeSession(sessionId: Long) =
+        api.revokeSession(requireAccessToken(), sessionId)
+
     private fun requireAccessToken(): String =
         sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
