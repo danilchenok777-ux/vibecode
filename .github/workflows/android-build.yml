@@ -1,0 +1,89 @@
+name: GODHEAD Android build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "TMessagesProj/**"
+      - "TMessagesProj_Modules/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "gradlew"
+      - "settings.gradle"
+      - "build.gradle"
+      - "gradle.properties"
+      - ".github/workflows/android-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: godhead-android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Validate required build credentials
+        env:
+          APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
+          APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+          MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
+        run: |
+          test -n "$APP_ID" || { echo "::error::Add TELEGRAM_APP_ID in repository Actions secrets."; exit 1; }
+          test -n "$APP_HASH" || { echo "::error::Add TELEGRAM_APP_HASH in repository Actions secrets."; exit 1; }
+          test -n "$MAPS_V2_API" || { echo "::error::Add MAPS_V2_API in repository Actions secrets."; exit 1; }
+          case "$APP_ID" in *[!0-9]*|'') echo "::error::TELEGRAM_APP_ID must be numeric."; exit 1;; esac
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: |
+          sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;4.0.0"
+
+      - name: Set up Python for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure private API keys
+        env:
+          APP_ID: ${{ secrets.TELEGRAM_APP_ID }}
+          APP_HASH: ${{ secrets.TELEGRAM_APP_HASH }}
+          MAPS_V2_API: ${{ secrets.MAPS_V2_API }}
+        run: |
+          {
+            printf 'APP_ID=%s\n' "$APP_ID"
+            printf 'APP_HASH="%s"\n' "$APP_HASH"
+            printf 'MAPS_V2_API="%s"\n' "$MAPS_V2_API"
+          } > API_KEYS
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build GODHEAD Android APK
+        run: ./gradlew --no-daemon :TMessagesProj:assembleFullArm64Debug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GODHEAD-full-arm64-debug
+          path: TMessagesProj/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
