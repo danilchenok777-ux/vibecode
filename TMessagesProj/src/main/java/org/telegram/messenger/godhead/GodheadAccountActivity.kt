@@ -187,7 +187,7 @@ class GodheadAccountActivity : Activity() {
             val details = TextView(this).apply {
                 text = if (session.isCurrent) {
                     getString(R.string.GodheadCurrentSession, session.id) +
-                        "\\n" + getString(R.string.GodheadSessionExpires, session.expiresAt)
+                        "\n" + getString(R.string.GodheadSessionExpires, session.expiresAt)
                 } else {
                     getString(
                         R.string.GodheadRemoteSession,
