@@ -56,5 +56,7 @@ def test_valid_production_settings_are_accepted():
         database_url="postgresql+psycopg://godhead:secret@localhost/godhead",
         jwt_secret="a-unique-production-secret-with-at-least-32-characters",
         access_token_minutes=20,
+        s3_access_key="godhead-production-storage",
+        s3_secret_key="a-unique-production-storage-secret-with-at-least-32-characters",
     )
     assert settings.env == "production"

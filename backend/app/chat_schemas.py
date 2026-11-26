@@ -11,12 +11,26 @@ class CreateMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4096)
 
 
+class AttachmentResponse(BaseModel):
+    id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
+class AttachmentDownloadResponse(BaseModel):
+    attachment: AttachmentResponse
+    url: str
+    expires_in: int
+
+
 class MessageResponse(BaseModel):
     id: int
     conversation_id: int
     sender_id: int
     content: str
     created_at: datetime
+    attachment: AttachmentResponse | None = None
 
 
 class ConversationResponse(BaseModel):

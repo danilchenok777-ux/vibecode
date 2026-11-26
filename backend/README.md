@@ -1,6 +1,6 @@
 # GODHEAD API
 
-The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, per-member read cursors, and live message events over WebSocket.
+The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, per-member read cursors, private S3-compatible file attachments, and live message events over WebSocket.
 
 ## Local development
 
@@ -11,6 +11,8 @@ python -m venv .venv
 pip install -e ".[dev]"
 cp .env.example .env
 # Replace GODHEAD_JWT_SECRET with a unique random value.
+# Start the local object store for attachment testing.
+docker compose up -d minio minio-init
 uvicorn app.main:app --reload
 ```
 
@@ -21,12 +23,12 @@ Development mode creates its local SQLite schema automatically. API docs are at 
 ```bash
 cd backend
 cp .env.example .env
-# Set GODHEAD_JWT_SECRET and a long URL-safe POSTGRES_PASSWORD.
+# Set GODHEAD_JWT_SECRET, GODHEAD_S3_ACCESS_KEY, GODHEAD_S3_SECRET_KEY and a long URL-safe POSTGRES_PASSWORD.
 docker compose up --build -d
 docker compose logs -f api
 ```
 
-The API container waits for PostgreSQL, applies versioned Alembic migrations, then starts Uvicorn. PostgreSQL data persists in the `godhead_postgres_data` volume. Back up that volume/database before upgrades.
+The API container waits for PostgreSQL, applies versioned Alembic migrations, waits for the MinIO bucket initializer, then starts Uvicorn. PostgreSQL and MinIO data persist in the `godhead_postgres_data` and `godhead_minio_data` volumes. Back up both before upgrades. Configure `GODHEAD_S3_PUBLIC_ENDPOINT_URL` to an address reachable by clients (Android emulator: `http://10.0.2.2:9000`; production: your HTTPS media endpoint).
 
 ## HTTP API
 
@@ -44,6 +46,9 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 - `GET /v1/conversations/{id}/messages` — page through message history using `before_id`.
 - `PUT /v1/conversations/{id}/read` — advance the current member's read cursor to a message in that conversation.
 - `GET /v1/conversations/{id}/read-states` — list each member's read cursor. A null cursor means that member has not marked any message as read.
+- `POST /v1/conversations/{id}/attachments` — upload a file and create a message containing its metadata. Maximum file size is 25 MiB; MIME types are allow-listed.
+- `GET /v1/conversations/{id}/attachments/{attachment_id}/download` — obtain a short-lived signed download URL after conversation-membership validation.
+
 
 - `GET /health/live` and `GET /health/ready` — process and database checks.
 
@@ -53,4 +58,4 @@ Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Conne
 
 ## Current production gaps
 
-WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, per-message delivery acknowledgements, moderation/abuse controls, attachments/object storage, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
+WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, per-message delivery acknowledgements, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.

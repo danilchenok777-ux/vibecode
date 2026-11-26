@@ -266,3 +266,110 @@ def test_read_cursor_rejects_message_from_another_conversation():
         )
         assert wrong_conversation.status_code == 404
 
+def test_conversation_attachment_upload_and_private_download(monkeypatch):
+    stored = {}
+
+    def fake_upload(fileobj, object_key, content_type, filename):
+        stored[object_key] = {
+            "bytes": fileobj.read(),
+            "content_type": content_type,
+            "filename": filename,
+        }
+
+    def fake_delete(object_key):
+        stored.pop(object_key, None)
+
+    def fake_download_url(object_key, filename, content_type):
+        assert object_key in stored
+        assert stored[object_key]["filename"] == filename
+        assert stored[object_key]["content_type"] == content_type
+        return "https://media.example.test/signed-object"
+
+    monkeypatch.setattr("app.chat_routes.upload_attachment_object", fake_upload)
+    monkeypatch.setattr("app.chat_routes.delete_attachment_object", fake_delete)
+    monkeypatch.setattr("app.chat_routes.create_attachment_download_url", fake_download_url)
+
+    with TestClient(app) as client:
+        token_a, user_a = register(client, "media_sender")
+        token_b, user_b = register(client, "media_receiver")
+        token_c, _ = register(client, "media_outsider")
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+
+        uploaded = client.post(
+            f"/v1/conversations/{conversation_id}/attachments",
+            headers=auth(token_a),
+            data={"caption": "Look at this image"},
+            files={"file": ("photo.png", b"\x89PNG\r\n\x1a\nprivate-image", "image/png")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        message = uploaded.json()
+        assert message["content"] == "Look at this image"
+        assert message["sender_id"] == user_a["id"]
+        assert message["attachment"]["filename"] == "photo.png"
+        assert message["attachment"]["content_type"] == "image/png"
+        assert message["attachment"]["size_bytes"] > 0
+        assert len(stored) == 1
+
+        history = client.get(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_b),
+        )
+        assert history.status_code == 200
+        assert history.json()["items"][0]["attachment"]["id"] == message["attachment"]["id"]
+
+        download = client.get(
+            f"/v1/conversations/{conversation_id}/attachments/{message['attachment']['id']}/download",
+            headers=auth(token_b),
+        )
+        assert download.status_code == 200
+        assert download.json()["url"] == "https://media.example.test/signed-object"
+        assert download.json()["expires_in"] >= 60
+
+        forbidden = client.get(
+            f"/v1/conversations/{conversation_id}/attachments/{message['attachment']['id']}/download",
+            headers=auth(token_c),
+        )
+        assert forbidden.status_code == 404
+
+
+def test_attachment_upload_rejects_unsupported_and_oversized_files(monkeypatch):
+    monkeypatch.setattr("app.chat_routes.upload_attachment_object", lambda *args, **kwargs: None)
+
+    with TestClient(app) as client:
+        token_a, _ = register(client, "media_limited_owner")
+        token_b, user_b = register(client, "media_limited_member")
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+
+        unsupported = client.post(
+            f"/v1/conversations/{conversation_id}/attachments",
+            headers=auth(token_a),
+            files={"file": ("script.txt", b"not an image", "text/plain")},
+        )
+        assert unsupported.status_code == 415
+
+        from app import chat_routes
+        monkeypatch.setattr(chat_routes, "MAX_ATTACHMENT_BYTES", 3)
+        oversized = client.post(
+            f"/v1/conversations/{conversation_id}/attachments",
+            headers=auth(token_a),
+            files={"file": ("photo.png", b"1234", "image/png")},
+        )
+        assert oversized.status_code == 413
+
+        history = client.get(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_b),
+        )
+        assert history.status_code == 200
+        assert history.json()["items"] == []
+
