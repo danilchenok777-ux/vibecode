@@ -157,3 +157,112 @@ def test_group_creation_validates_members_and_messages():
             json={"title": "   ", "member_ids": [999999]},
         )
         assert blank_title.status_code == 422
+
+def test_read_cursors_are_member_scoped_and_never_move_backwards():
+    with TestClient(app) as client:
+        token_a, user_a = register(client, "read_sender")
+        token_b, user_b = register(client, "read_receiver")
+        token_c, _ = register(client, "read_outsider")
+
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+
+        first = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_a),
+            json={"content": "First"},
+        )
+        second = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=auth(token_a),
+            json={"content": "Second"},
+        )
+        assert first.status_code == 201
+        assert second.status_code == 201
+
+        initial_states = client.get(
+            f"/v1/conversations/{conversation_id}/read-states",
+            headers=auth(token_a),
+        )
+        assert initial_states.status_code == 200
+        assert len(initial_states.json()) == 2
+        assert all(item["last_read_message_id"] is None for item in initial_states.json())
+
+        marked = client.put(
+            f"/v1/conversations/{conversation_id}/read",
+            headers=auth(token_b),
+            json={"last_read_message_id": second.json()["id"]},
+        )
+        assert marked.status_code == 200, marked.text
+        assert marked.json()["last_read_message_id"] == second.json()["id"]
+        assert marked.json()["user_id"] == user_b["id"]
+
+        # A stale page from another device must not rewind the cursor.
+        stale_mark = client.put(
+            f"/v1/conversations/{conversation_id}/read",
+            headers=auth(token_b),
+            json={"last_read_message_id": first.json()["id"]},
+        )
+        assert stale_mark.status_code == 200
+        assert stale_mark.json()["last_read_message_id"] == second.json()["id"]
+
+        states = client.get(
+            f"/v1/conversations/{conversation_id}/read-states",
+            headers=auth(token_a),
+        )
+        assert states.status_code == 200
+        by_user = {item["user_id"]: item["last_read_message_id"] for item in states.json()}
+        assert by_user[user_a["id"]] is None
+        assert by_user[user_b["id"]] == second.json()["id"]
+
+        hidden = client.get(
+            f"/v1/conversations/{conversation_id}/read-states",
+            headers=auth(token_c),
+        )
+        assert hidden.status_code == 404
+        forbidden = client.put(
+            f"/v1/conversations/{conversation_id}/read",
+            headers=auth(token_c),
+            json={"last_read_message_id": second.json()["id"]},
+        )
+        assert forbidden.status_code == 404
+
+
+def test_read_cursor_rejects_message_from_another_conversation():
+    with TestClient(app) as client:
+        token_a, _ = register(client, "read_owner")
+        token_b, user_b = register(client, "read_member")
+        token_c, user_c = register(client, "read_other")
+
+        first_chat = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert first_chat.status_code == 200
+        first_id = first_chat.json()["id"]
+
+        second_chat = client.post(
+            f"/v1/conversations/direct/{user_c['id']}",
+            headers=auth(token_b),
+        )
+        assert second_chat.status_code == 200
+        second_id = second_chat.json()["id"]
+
+        outsider_message = client.post(
+            f"/v1/conversations/{second_id}/messages",
+            headers=auth(token_b),
+            json={"content": "Different conversation"},
+        )
+        assert outsider_message.status_code == 201
+
+        wrong_conversation = client.put(
+            f"/v1/conversations/{first_id}/read",
+            headers=auth(token_a),
+            json={"last_read_message_id": outsider_message.json()["id"]},
+        )
+        assert wrong_conversation.status_code == 404
+

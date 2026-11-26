@@ -1,6 +1,6 @@
 # GODHEAD API
 
-The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, and live message events over WebSocket.
+The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, per-member read cursors, and live message events over WebSocket.
 
 ## Local development
 
@@ -40,6 +40,9 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, th
 - `GET /v1/conversations` — list the current user's conversations.
 - `POST /v1/conversations/{id}/messages` — send a text message.
 - `GET /v1/conversations/{id}/messages` — page through message history using `before_id`.
+- `PUT /v1/conversations/{id}/read` — advance the current member's read cursor to a message in that conversation.
+- `GET /v1/conversations/{id}/read-states` — list each member's read cursor. A null cursor means that member has not marked any message as read.
+
 - `GET /health/live` and `GET /health/ready` — process and database checks.
 
 ## WebSocket

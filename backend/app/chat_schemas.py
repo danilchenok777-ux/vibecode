@@ -33,3 +33,14 @@ class ConversationResponse(BaseModel):
 class MessagePageResponse(BaseModel):
     items: list[MessageResponse]
     next_before_id: int | None = None
+
+
+class MarkConversationReadRequest(BaseModel):
+    last_read_message_id: int = Field(gt=0)
+
+
+class ConversationReadStateResponse(BaseModel):
+    conversation_id: int
+    user_id: int
+    last_read_message_id: int | None
+    updated_at: datetime | None

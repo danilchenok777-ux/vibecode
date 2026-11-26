@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from .auth import get_current_user
 from .database import get_db
-from .models import Conversation, ConversationMember, Message, User
+from .models import Conversation, ConversationMember, ConversationReadState, Message, User
 from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
-    MessagePageResponse, MessageResponse,
+    MessagePageResponse, MessageResponse, MarkConversationReadRequest,
+    ConversationReadStateResponse,
 )
 from .chat_realtime import connection_manager
 
@@ -234,3 +235,102 @@ def list_messages(
         items=[_message_response(message) for message in page],
         next_before_id=next_before_id,
     )
+
+@router.put(
+    "/conversations/{conversation_id}/read",
+    response_model=ConversationReadStateResponse,
+)
+def mark_conversation_read(
+    conversation_id: int,
+    payload: MarkConversationReadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    message_exists = db.scalar(
+        select(Message.id).where(
+            Message.id == payload.last_read_message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if message_exists is None:
+        raise HTTPException(status_code=404, detail="Message not found in this conversation")
+
+    state = db.get(ConversationReadState, (conversation_id, current_user.id))
+    now = datetime.now(timezone.utc)
+    if state is None:
+        state = ConversationReadState(
+            conversation_id=conversation_id,
+            user_id=current_user.id,
+            last_read_message_id=payload.last_read_message_id,
+            updated_at=now,
+        )
+        db.add(state)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Two devices can mark the same conversation as read at once.
+            # Resolve the unique-key race by keeping the furthest read cursor.
+            db.rollback()
+            state = db.get(ConversationReadState, (conversation_id, current_user.id))
+            if state is None:
+                raise
+            if (
+                state.last_read_message_id is None
+                or payload.last_read_message_id > state.last_read_message_id
+            ):
+                state.last_read_message_id = payload.last_read_message_id
+                state.updated_at = now
+                db.commit()
+    elif (
+        state.last_read_message_id is None
+        or payload.last_read_message_id > state.last_read_message_id
+    ):
+        # Read cursors are monotonic: stale devices cannot move them backwards.
+        state.last_read_message_id = payload.last_read_message_id
+        state.updated_at = now
+        db.commit()
+
+    db.refresh(state)
+    return ConversationReadStateResponse(
+        conversation_id=state.conversation_id,
+        user_id=state.user_id,
+        last_read_message_id=state.last_read_message_id,
+        updated_at=state.updated_at,
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}/read-states",
+    response_model=list[ConversationReadStateResponse],
+)
+def list_conversation_read_states(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    rows = db.execute(
+        select(
+            ConversationMember.user_id,
+            ConversationReadState.last_read_message_id,
+            ConversationReadState.updated_at,
+        )
+        .outerjoin(
+            ConversationReadState,
+            (ConversationReadState.conversation_id == ConversationMember.conversation_id)
+            & (ConversationReadState.user_id == ConversationMember.user_id),
+        )
+        .where(ConversationMember.conversation_id == conversation_id)
+        .order_by(ConversationMember.user_id.asc())
+    ).all()
+    return [
+        ConversationReadStateResponse(
+            conversation_id=conversation_id,
+            user_id=row.user_id,
+            last_read_message_id=row.last_read_message_id,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+
