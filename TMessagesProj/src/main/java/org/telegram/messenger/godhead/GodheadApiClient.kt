@@ -85,7 +85,7 @@ class GodheadApiClient(baseUrl: String) {
             .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
-        return parseUser(execute(request).getJSONObject("user"))
+        return parseUser(execute(request))
     }
 
     private suspend fun authRequest(path: String, payload: JSONObject): GodheadAuthSession {
