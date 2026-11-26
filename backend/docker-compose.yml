@@ -14,6 +14,34 @@ services:
       timeout: 5s
       retries: 20
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${GODHEAD_S3_ACCESS_KEY:-godhead-dev-access}
+      MINIO_ROOT_PASSWORD: ${GODHEAD_S3_SECRET_KEY:?Set GODHEAD_S3_SECRET_KEY in backend/.env}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - godhead_minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      mc alias set godhead http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+      until mc ready godhead; do sleep 2; done &&
+      mc mb --ignore-existing "godhead/$GODHEAD_S3_BUCKET"
+    environment:
+      MINIO_ROOT_USER: ${GODHEAD_S3_ACCESS_KEY:-godhead-dev-access}
+      MINIO_ROOT_PASSWORD: ${GODHEAD_S3_SECRET_KEY:?Set GODHEAD_S3_SECRET_KEY in backend/.env}
+      GODHEAD_S3_BUCKET: ${GODHEAD_S3_BUCKET:-godhead-media}
+    restart: "no"
+
   api:
     build: .
     restart: unless-stopped
@@ -21,9 +49,18 @@ services:
     environment:
       GODHEAD_ENV: production
       GODHEAD_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-godhead}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-godhead}
+      GODHEAD_S3_ENDPOINT_URL: http://minio:9000
+      GODHEAD_S3_PUBLIC_ENDPOINT_URL: ${GODHEAD_S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      GODHEAD_S3_REGION: ${GODHEAD_S3_REGION:-us-east-1}
+      GODHEAD_S3_BUCKET: ${GODHEAD_S3_BUCKET:-godhead-media}
+      GODHEAD_S3_ACCESS_KEY: ${GODHEAD_S3_ACCESS_KEY:-godhead-dev-access}
+      GODHEAD_S3_SECRET_KEY: ${GODHEAD_S3_SECRET_KEY:?Set GODHEAD_S3_SECRET_KEY in backend/.env}
+      GODHEAD_S3_PRESIGN_TTL_SECONDS: ${GODHEAD_S3_PRESIGN_TTL_SECONDS:-300}
     depends_on:
       db:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     healthcheck:
@@ -34,3 +71,4 @@ services:
 
 volumes:
   godhead_postgres_data:
+  godhead_minio_data:
