@@ -74,12 +74,29 @@ jobs:
         run: |
           yes | sdkmanager --licenses
           # Android 17 / API 37 is distributed as a preview package named android-37.0.
-          sdkmanager --install --channel=3 "platforms;android-37.0" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;4.0.0"
+          sdkmanager --install --channel=3 "platforms;android-37.0" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
           # Some AGP versions still resolve compileSdk 37 from platforms/android-37.
           if [[ -d "$ANDROID_HOME/platforms/android-37.0" && ! -e "$ANDROID_HOME/platforms/android-37" ]]; then
             ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
           fi
           test -d "$ANDROID_HOME/platforms/android-37"
+          test -x "$ANDROID_HOME/cmake/3.22.1/bin/ninja"
+
+      - name: Install CMake 4.x required by ExteraGram native build
+        run: |
+          CMAKE_ARCHIVE="$RUNNER_TEMP/cmake-4.5.1-linux-x86_64.tar.gz"
+          CMAKE_ROOT="$RUNNER_TEMP/cmake-4.5.1-linux-x86_64"
+          curl --fail --location --silent --show-error \
+            "https://github.com/Kitware/CMake/releases/download/v4.5.1/cmake-4.5.1-linux-x86_64.tar.gz" \
+            --output "$CMAKE_ARCHIVE"
+          echo "83b71181fb62b4fe8f26067a9321448572e7a43bd04ff6c7f54a24c33698f16d  $CMAKE_ARCHIVE" | sha256sum --check
+          tar -xzf "$CMAKE_ARCHIVE" -C "$RUNNER_TEMP"
+          test -x "$CMAKE_ROOT/bin/cmake"
+          "$CMAKE_ROOT/bin/cmake" --version
+          # Gradle uses this external CMake root; Ninja is supplied by the SDK package.
+          printf 'cmake.dir=%s\\n' "$CMAKE_ROOT" >> local.properties
+          echo "$CMAKE_ROOT/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
 
       - name: Set up Python 3.11 for Chaquopy
         uses: actions/setup-python@v5
