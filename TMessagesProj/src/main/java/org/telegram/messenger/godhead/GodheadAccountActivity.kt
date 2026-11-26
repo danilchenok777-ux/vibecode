@@ -157,10 +157,11 @@ class GodheadAccountActivity : Activity() {
         statusView.text = getString(R.string.GodheadWorking)
         activityScope.launch {
             try {
-                renderSessions(repository().listSessions())
+                val sessions = repository().listSessions()
+                renderSessions(sessions)
                 statusView.text = getString(
                     R.string.GodheadSessionsLoaded,
-                    sessionsContainer.childCount
+                    sessions.size
                 )
             } catch (error: Exception) {
                 statusView.text = error.message?.takeIf { it.isNotBlank() }
