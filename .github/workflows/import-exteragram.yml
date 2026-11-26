@@ -60,7 +60,7 @@ jobs:
           # Restore the already implemented GODHEAD API from its protected branch.
           git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
           git fetch --depth=1 godhead backup/backend-foundation
-          git archive FETCH_HEAD backend .github/workflows/android-build.yml | tar -x
+          git archive FETCH_HEAD backend TMessagesProj/src/main/java/org/telegram/messenger/godhead .github/workflows/android-build.yml | tar -x
 
           cat > README.md <<'EOF'
           # GODHEAD
@@ -101,6 +101,12 @@ jobs:
 
           Every feature must have its real implementation, server-side validation where applicable, error handling, security controls, and automated tests. A milestone is complete only when its acceptance criteria pass; repository documentation must not claim unimplemented functionality is ready.
           EOF
+
+          # Apply the GODHEAD Android application identity. Keep the Android
+          # namespace and upstream attribution intact for compatibility.
+          sed -i 's/^APP_PACKAGE=.*/APP_PACKAGE=com.godhead.messenger/' gradle.properties
+          sed -i 's#<string name="AppName">[^<]*</string>#<string name="AppName">GODHEAD</string>#' TMessagesProj/src/main/res/values/strings.xml
+          sed -i 's#<string name="AppNameBeta">[^<]*</string>#<string name="AppNameBeta">GODHEAD Beta</string>#' TMessagesProj/src/main/res/values/strings.xml
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
