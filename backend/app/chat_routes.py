@@ -1,5 +1,12 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from pathlib import Path
+from uuid import uuid4
+import logging
+
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
+    Query, UploadFile, status,
+)
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -7,16 +14,38 @@ from sqlalchemy.orm import Session
 
 from .auth import get_current_user
 from .database import get_db
-from .models import Conversation, ConversationMember, ConversationReadState, Message, User
+from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, User
 from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
     MessagePageResponse, MessageResponse, MarkConversationReadRequest,
-    ConversationReadStateResponse,
+    ConversationReadStateResponse, AttachmentDownloadResponse, AttachmentResponse,
 )
 from .chat_realtime import connection_manager
+from .storage import (
+    create_attachment_download_url,
+    delete_attachment_object,
+    upload_attachment_object,
+)
 
 router = APIRouter(prefix="/v1", tags=["messaging"])
 MAX_GROUP_MEMBERS = 200
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+ALLOWED_ATTACHMENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/aac",
+    "audio/ogg",
+    "audio/wav",
+    "application/pdf",
+}
+logger = logging.getLogger(__name__)
 
 
 def _require_membership(db: Session, conversation_id: int, user_id: int) -> Conversation:
@@ -34,12 +63,22 @@ def _require_membership(db: Session, conversation_id: int, user_id: int) -> Conv
 def _message_response(message: Message | None):
     if message is None:
         return None
+    attachment = message.attachment
     return MessageResponse(
         id=message.id,
         conversation_id=message.conversation_id,
         sender_id=message.sender_id,
         content=message.content,
         created_at=message.created_at,
+        attachment=(
+            AttachmentResponse(
+                id=attachment.id,
+                filename=attachment.filename,
+                content_type=attachment.content_type,
+                size_bytes=attachment.size_bytes,
+            )
+            if attachment is not None else None
+        ),
     )
 
 
@@ -210,6 +249,132 @@ def send_message(
     }
     background_tasks.add_task(connection_manager.broadcast, list(recipients), event)
     return _message_response(message)
+
+
+@router.post(
+    "/conversations/{conversation_id}/attachments",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_conversation_attachment(
+    conversation_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    caption: str = Form(default="", max_length=4096),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = _require_membership(db, conversation_id, current_user.id)
+
+    filename = (file.filename or "attachment").replace("\\", "/").split("/")[-1]
+    filename = filename.replace(chr(0), "").replace("\r", "").replace("\n", "").strip()
+    if not filename or filename in {".", ".."}:
+        raise HTTPException(status_code=422, detail="A valid attachment filename is required")
+    filename = filename[:255]
+
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type not in ALLOWED_ATTACHMENT_TYPES:
+        raise HTTPException(status_code=415, detail="This attachment content type is not supported")
+
+    size_bytes = file.size
+    if size_bytes is None:
+        file.file.seek(0, 2)
+        size_bytes = file.file.tell()
+    file.file.seek(0)
+    if size_bytes <= 0:
+        raise HTTPException(status_code=422, detail="Attachment cannot be empty")
+    if size_bytes > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Attachment exceeds the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    object_key = f"conversations/{conversation.id}/{uuid4().hex}"
+    try:
+        upload_attachment_object(file.file, object_key, content_type, filename)
+    except Exception as error:
+        logger.exception("GODHEAD attachment storage upload failed")
+        raise HTTPException(status_code=503, detail="Attachment storage is unavailable") from error
+
+    message = Message(
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        content=caption.strip() or filename,
+    )
+    message.attachment = Attachment(
+        object_key=object_key,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=size_bytes,
+    )
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.add(message)
+    try:
+        db.commit()
+        db.refresh(message)
+    except Exception:
+        db.rollback()
+        try:
+            delete_attachment_object(object_key)
+        except Exception:
+            logger.exception("Failed to remove an orphaned GODHEAD attachment object")
+        raise
+
+    recipients = db.scalars(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation.id)
+    ).all()
+    event = {
+        "type": "message.created",
+        "data": jsonable_encoder(_message_response(message)),
+    }
+    background_tasks.add_task(connection_manager.broadcast, list(recipients), event)
+    return _message_response(message)
+
+
+@router.get(
+    "/conversations/{conversation_id}/attachments/{attachment_id}/download",
+    response_model=AttachmentDownloadResponse,
+)
+def get_conversation_attachment_download(
+    conversation_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    attachment = db.scalar(
+        select(Attachment)
+        .join(Message, Message.id == Attachment.message_id)
+        .where(
+            Attachment.id == attachment_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    try:
+        url = create_attachment_download_url(
+            attachment.object_key,
+            attachment.filename,
+            attachment.content_type,
+        )
+    except Exception as error:
+        logger.exception("GODHEAD attachment download URL generation failed")
+        raise HTTPException(status_code=503, detail="Attachment storage is unavailable") from error
+
+    settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
+    return AttachmentDownloadResponse(
+        attachment=AttachmentResponse(
+            id=attachment.id,
+            filename=attachment.filename,
+            content_type=attachment.content_type,
+            size_bytes=attachment.size_bytes,
+        ),
+        url=url,
+        expires_in=settings.s3_presign_ttl_seconds,
+    )
 
 
 @router.get(
