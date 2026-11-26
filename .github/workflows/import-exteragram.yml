@@ -1,0 +1,110 @@
+name: Import ExteraGram base
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .godhead-import-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: godhead-upstream-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out GODHEAD project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone ExteraGram with required submodules
+        run: |
+          git clone --branch main --recurse-submodules --shallow-submodules https://github.com/exteraSquad/exteraGram.git /tmp/exteragram
+          cd /tmp/exteragram
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          test -f settings.gradle
+          test -f gradlew
+          test -f TMessagesProj/build.gradle
+          test -f .gitmodules
+          # QuickJS test262 is an optional upstream test corpus, intentionally skipped.
+          if ! git submodule status --recursive | awk '$1 ~ /^[-+U]/ && $2 !~ /\/test262$/ { print; bad=1 } END { exit bad }'; then
+            echo "A required upstream submodule is missing or mismatched."
+            exit 1
+          fi
+
+      - name: Apply GODHEAD project changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd /tmp/exteragram
+          cp README.md UPSTREAM_README.md
+          git remote add godhead "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
+          git fetch --depth=1 godhead backup/backend-foundation
+          git archive FETCH_HEAD backend TMessagesProj/src/main/java/org/telegram/messenger/godhead | tar -x
+
+          rm -f TMessagesProj/google-services.json
+          sed -i 's/^APP_PACKAGE=.*/APP_PACKAGE=com.godhead.messenger/' gradle.properties
+          sed -i 's#<string name="AppName">[^<]*</string>#<string name="AppName">GODHEAD</string>#' TMessagesProj/src/main/res/values/strings.xml
+          sed -i 's#<string name="AppNameBeta">[^<]*</string>#<string name="AppNameBeta">GODHEAD Beta</string>#' TMessagesProj/src/main/res/values/strings.xml
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java")
+          source = path.read_text(encoding="utf-8")
+          old = "        versionView.setText(AppUtils.getVersionText());"
+          new = """        versionView.setText(AppUtils.getVersionText() + "\\nBased on ExteraGram\\nhttps://github.com/exteraSquad/exteraGram");
+                  android.text.util.Linkify.addLinks(versionView, android.text.util.Linkify.WEB_URLS);
+                  versionView.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());"""
+          if old not in source:
+              raise SystemExit("Could not locate the Settings footer for required ExteraGram attribution.")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          cat > README.md <<'EOF'
+          # GODHEAD
+
+          GODHEAD is an Android communication platform developed from the ExteraGram client codebase. This is the production project, not a demo or disposable prototype.
+
+          ## Project structure
+
+          - Android client: ExteraGram-derived Android application, rebranded with the GODHEAD application ID and name.
+          - GODHEAD API: registration, authentication, private/group conversations, message history and realtime events.
+          - PostgreSQL schema and migrations: backend/alembic.
+          - Upstream build documentation: [UPSTREAM_README.md](UPSTREAM_README.md).
+
+          ## Product requirements
+
+          The complete product target includes independently operated GODHEAD accounts, private and group chats, attachments, media, search, voice/video calls, push notifications, GRAM balances and auditable transactions, Premium entitlements, stickers, gifts, collections, crafting, maps, privacy controls, localization and accessibility. Features must not be described as operational until their real implementation and service integration are complete.
+
+          ## Upstream, attribution and licensing
+
+          - Android client upstream: https://github.com/exteraSquad/exteraGram
+          - License: GNU GPL v3 or later, subject to upstream additional terms.
+          - Preserve upstream copyright notices, author attributions, and all applicable license terms.
+          - Settings footer retains a clickable “Based on ExteraGram” attribution and upstream repository link.
+          - GODHEAD is a distinct, independently developed product and is not endorsed by ExteraGram authors.
+
+          ## Build and configuration
+
+          Follow [UPSTREAM_README.md](UPSTREAM_README.md) for Android build prerequisites. Supply your own Telegram API ID/hash while Telegram MTProto remains in use, and your own Firebase configuration if Firebase-based upstream features remain enabled. Never commit credentials, Firebase configuration, signing keys, keystores or passwords.
+
+          ## Service boundary
+
+          Telegram/MTProto networking remains upstream functionality until a GODHEAD replacement is implemented, security-reviewed, tested and deliberately enabled. GODHEAD identity and messaging APIs are separate from Telegram account sessions.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: import ExteraGram and apply GODHEAD project changes"
+          git push godhead HEAD:refs/heads/godhead-source-import --force
