@@ -3,13 +3,17 @@ package org.telegram.messenger.godhead
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 
 data class GodheadUser(
@@ -38,7 +42,33 @@ data class GodheadMessage(
     val conversationId: Long,
     val senderId: Long,
     val content: String,
-    val createdAt: String
+    val createdAt: String,
+    val attachment: GodheadAttachment? = null
+)
+
+data class GodheadAttachment(
+    val id: Long,
+    val filename: String,
+    val contentType: String,
+    val sizeBytes: Long
+)
+
+data class GodheadAttachmentDownload(
+    val attachment: GodheadAttachment,
+    val url: String,
+    val expiresInSeconds: Long
+)
+
+data class GodheadReadState(
+    val conversationId: Long,
+    val userId: Long,
+    val lastReadMessageId: Long?
+)
+
+data class GodheadDeliveryState(
+    val messageId: Long,
+    val userId: Long,
+    val deliveredAt: String?
 )
 
 data class GodheadConversation(
@@ -49,7 +79,8 @@ data class GodheadConversation(
     val memberIds: List<Long>,
     val createdAt: String,
     val updatedAt: String,
-    val lastMessage: GodheadMessage?
+    val lastMessage: GodheadMessage?,
+    val unreadCount: Int
 )
 
 data class GodheadMessagePage(
@@ -228,6 +259,126 @@ class GodheadApiClient(baseUrl: String) {
         return parseMessage(execute(request))
     }
 
+    suspend fun uploadAttachment(
+        accessToken: String,
+        conversationId: Long,
+        file: File,
+        filename: String,
+        contentType: String,
+        caption: String = ""
+    ): GodheadMessage {
+        require(conversationId > 0) { "Conversation ID must be positive" }
+        require(file.isFile && file.length() in 1..(25L * 1024 * 1024)) {
+            "Attachment must be a file no larger than 25 MiB"
+        }
+        require(contentType.isNotBlank()) { "Attachment MIME type is required" }
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("caption", caption.take(4096))
+            .addFormDataPart("file", filename, file.asRequestBody(contentType.toMediaType()))
+            .build()
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/attachments", accessToken
+        ).post(body).build()
+        return parseMessage(execute(request))
+    }
+
+    suspend fun attachmentDownload(
+        accessToken: String,
+        conversationId: Long,
+        attachmentId: Long
+    ): GodheadAttachmentDownload {
+        require(conversationId > 0 && attachmentId > 0) { "Attachment ID is invalid" }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/attachments/$attachmentId/download", accessToken
+        ).get().build()
+        val response = execute(request)
+        return GodheadAttachmentDownload(
+            attachment = parseAttachment(response.getJSONObject("attachment")),
+            url = response.getString("url"),
+            expiresInSeconds = response.optLong("expires_in", 0)
+        )
+    }
+
+    suspend fun downloadAttachment(
+        accessToken: String,
+        conversationId: Long,
+        attachmentId: Long,
+        output: OutputStream
+    ): GodheadAttachment {
+        val download = attachmentDownload(accessToken, conversationId, attachmentId)
+        val localApiPath = download.url.startsWith("/")
+        val url = if (localApiPath) baseUrl.trimEnd('/') + download.url else download.url
+        val builder = Request.Builder().url(url).header("Accept", download.attachment.contentType).get()
+        // Local disk downloads pass through the API ACL; S3 URLs are already
+        // short-lived signed URLs and must not receive the GODHEAD bearer token.
+        if (localApiPath) builder.header("Authorization", "Bearer $accessToken")
+        withContext(Dispatchers.IO) {
+            http.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw GodheadApiException(response.code, "Attachment download failed")
+                }
+                val body = response.body ?: throw IOException("Attachment response was empty")
+                if (body.contentLength() > 25L * 1024 * 1024) {
+                    throw IOException("Attachment exceeds the 25 MiB limit")
+                }
+                body.byteStream().use { input -> input.copyTo(output) }
+            }
+        }
+        return download.attachment
+    }
+
+    suspend fun acknowledgeDelivery(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): GodheadDeliveryState {
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery", accessToken
+        ).post("{}".toRequestBody(JSON_MEDIA_TYPE)).build()
+        return parseDeliveryState(execute(request))
+    }
+
+    suspend fun markConversationRead(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): GodheadReadState {
+        val payload = JSONObject().put("last_read_message_id", messageId)
+            .toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/read", accessToken
+        ).put(payload).build()
+        return parseReadState(execute(request))
+    }
+
+    suspend fun listReadStates(
+        accessToken: String,
+        conversationId: Long
+    ): List<GodheadReadState> {
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/read-states", accessToken
+        ).get().build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) add(parseReadState(array.getJSONObject(index)))
+        }
+    }
+
+    suspend fun listDeliveryStates(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): List<GodheadDeliveryState> {
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery-states", accessToken
+        ).get().build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) add(parseDeliveryState(array.getJSONObject(index)))
+        }
+    }
+
     suspend fun listMessages(
         accessToken: String,
         conversationId: Long,
@@ -353,7 +504,29 @@ class GodheadApiClient(baseUrl: String) {
         conversationId = json.getLong("conversation_id"),
         senderId = json.getLong("sender_id"),
         content = json.getString("content"),
-        createdAt = json.optString("created_at")
+        createdAt = json.optString("created_at"),
+        attachment = if (json.isNull("attachment")) null
+            else parseAttachment(json.getJSONObject("attachment"))
+    )
+
+    private fun parseAttachment(json: JSONObject) = GodheadAttachment(
+        id = json.getLong("id"),
+        filename = json.getString("filename"),
+        contentType = json.getString("content_type"),
+        sizeBytes = json.getLong("size_bytes")
+    )
+
+    private fun parseReadState(json: JSONObject) = GodheadReadState(
+        conversationId = json.getLong("conversation_id"),
+        userId = json.getLong("user_id"),
+        lastReadMessageId = if (json.isNull("last_read_message_id")) null
+            else json.getLong("last_read_message_id")
+    )
+
+    private fun parseDeliveryState(json: JSONObject) = GodheadDeliveryState(
+        messageId = json.getLong("message_id"),
+        userId = json.getLong("user_id"),
+        deliveredAt = if (json.isNull("delivered_at")) null else json.getString("delivered_at")
     )
 
     private fun parseConversation(json: JSONObject): GodheadConversation {
@@ -371,7 +544,8 @@ class GodheadApiClient(baseUrl: String) {
             memberIds = memberIds,
             createdAt = json.optString("created_at"),
             updatedAt = json.optString("updated_at"),
-            lastMessage = lastMessage
+            lastMessage = lastMessage,
+            unreadCount = json.optInt("unread_count", 0)
         )
     }
 

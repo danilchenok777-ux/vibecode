@@ -60,3 +60,15 @@ def test_valid_production_settings_are_accepted():
         s3_secret_key="a-unique-production-storage-secret-with-at-least-32-characters",
     )
     assert settings.env == "production"
+
+
+def test_local_attachment_storage_does_not_require_object_store_credentials():
+    settings = Settings(
+        _env_file=None,
+        env="production",
+        database_url="postgresql+psycopg://godhead:secret@localhost/godhead",
+        jwt_secret="a-unique-production-secret-with-at-least-32-characters",
+        attachment_storage_backend="local",
+        local_storage_dir="./.godhead_storage/attachments",
+    )
+    assert settings.attachment_storage_backend == "local"

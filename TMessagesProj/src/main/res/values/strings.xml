@@ -11739,4 +11739,11 @@
     <string name="GodheadRemoteSession">Session #%1$d\nCreated: %2$s\nExpires: %3$s</string>
     <string name="GodheadRevokeSession">Revoke</string>
     <string name="GodheadSessionRevoked">Remote session revoked. That access token can no longer be used.</string>
+    <string name="GodheadChooseAttachment">Attach file</string>
+    <string name="GodheadDownloadAttachment">Download %1$s</string>
+    <string name="GodheadUnreadCount">%1$s · %2$d unread</string>
+    <string name="GodheadAttachmentSaved">Saved %1$s</string>
+    <string name="GodheadAttachmentFailed">Attachment transfer failed</string>
+    <string name="GodheadAttachmentSent">Attachment sent.</string>
+    <string name="GodheadLoadEarlierMessages">Load earlier messages</string>
 </resources>

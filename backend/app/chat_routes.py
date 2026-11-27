@@ -6,8 +6,9 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
     Query, UploadFile, status,
 )
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,7 +26,9 @@ from .chat_realtime import connection_manager
 from .storage import (
     create_attachment_download_url,
     delete_attachment_object,
+    get_local_attachment_path,
     upload_attachment_object,
+    uses_local_storage,
 )
 
 router = APIRouter(prefix="/v1", tags=["messaging"])
@@ -83,7 +86,44 @@ def _message_response(message: Message | None):
     )
 
 
-def _conversation_response(db: Session, conversation: Conversation) -> ConversationResponse:
+def _matches_attachment_signature(file: UploadFile, content_type: str) -> bool:
+    position = file.file.tell()
+    header = file.file.read(16)
+    file.file.seek(position)
+    if content_type == "image/jpeg":
+        return header.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+    if content_type == "image/gif":
+        return header.startswith((b"GIF87a", b"GIF89a"))
+    if content_type == "application/pdf":
+        return header.startswith(b"%PDF-")
+    if content_type in {"video/mp4", "video/quicktime", "audio/mp4"}:
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            return False
+        return content_type != "video/quicktime" or header[8:12] == b"qt  "
+    if content_type == "video/webm":
+        return header.startswith(b"\x1aE\xdf\xa3")
+    if content_type == "audio/mpeg":
+        return header.startswith(b"ID3") or (
+            len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0
+        )
+    if content_type == "audio/aac":
+        return len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xF6) == 0xF0
+    if content_type == "audio/ogg":
+        return header.startswith(b"OggS")
+    if content_type == "audio/wav":
+        return header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+    return False
+
+
+def _conversation_response(
+    db: Session,
+    conversation: Conversation,
+    current_user_id: int,
+) -> ConversationResponse:
     members = db.scalars(
         select(ConversationMember.user_id)
         .where(ConversationMember.conversation_id == conversation.id)
@@ -95,6 +135,15 @@ def _conversation_response(db: Session, conversation: Conversation) -> Conversat
         .order_by(Message.id.desc())
         .limit(1)
     )
+    read_state = db.get(ConversationReadState, (conversation.id, current_user_id))
+    read_cursor = read_state.last_read_message_id if read_state else None
+    unread_query = select(func.count(Message.id)).where(
+        Message.conversation_id == conversation.id,
+        Message.sender_id != current_user_id,
+    )
+    if read_cursor is not None:
+        unread_query = unread_query.where(Message.id > read_cursor)
+    unread_count = db.scalar(unread_query) or 0
     return ConversationResponse(
         id=conversation.id,
         kind=conversation.kind,
@@ -103,6 +152,7 @@ def _conversation_response(db: Session, conversation: Conversation) -> Conversat
         member_ids=list(members),
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+        unread_count=unread_count,
         last_message=_message_response(last_message),
     )
 
@@ -149,7 +199,7 @@ def open_direct_conversation(
             )
             if conversation is None:
                 raise
-    return _conversation_response(db, conversation)
+    return _conversation_response(db, conversation, current_user.id)
 
 
 @router.post(
@@ -194,7 +244,7 @@ def create_group_conversation(
     )
     db.commit()
     db.refresh(conversation)
-    return _conversation_response(db, conversation)
+    return _conversation_response(db, conversation, current_user.id)
 
 
 @router.get("/conversations", response_model=list[ConversationResponse])
@@ -210,7 +260,10 @@ def list_conversations(
         .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(limit)
     ).all()
-    return [_conversation_response(db, conversation) for conversation in conversations]
+    return [
+        _conversation_response(db, conversation, current_user.id)
+        for conversation in conversations
+    ]
 
 
 @router.post(
@@ -276,7 +329,6 @@ def upload_conversation_attachment(
     content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     if content_type not in ALLOWED_ATTACHMENT_TYPES:
         raise HTTPException(status_code=415, detail="This attachment content type is not supported")
-
     size_bytes = getattr(file, "size", None)
     if size_bytes is None:
         file.file.seek(0, 2)
@@ -289,6 +341,8 @@ def upload_conversation_attachment(
             status_code=413,
             detail=f"Attachment exceeds the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB limit",
         )
+    if not _matches_attachment_signature(file, content_type):
+        raise HTTPException(status_code=415, detail="Attachment content does not match its MIME type")
 
     object_key = f"conversations/{conversation.id}/{uuid4().hex}"
     try:
@@ -356,10 +410,14 @@ def get_conversation_attachment_download(
         raise HTTPException(status_code=404, detail="Attachment not found")
 
     try:
-        url = create_attachment_download_url(
-            attachment.object_key,
-            attachment.filename,
-            attachment.content_type,
+        url = (
+            f"/v1/conversations/{conversation_id}/attachments/{attachment_id}/content"
+            if uses_local_storage()
+            else create_attachment_download_url(
+                attachment.object_key,
+                attachment.filename,
+                attachment.content_type,
+            )
         )
     except Exception as error:
         logger.exception("GODHEAD attachment download URL generation failed")
@@ -374,8 +432,53 @@ def get_conversation_attachment_download(
             size_bytes=attachment.size_bytes,
         ),
         url=url,
-        expires_in=settings.s3_presign_ttl_seconds,
+        expires_in=0 if uses_local_storage() else settings.s3_presign_ttl_seconds,
     )
+
+
+@router.get(
+    "/conversations/{conversation_id}/attachments/{attachment_id}/content",
+    name="stream_conversation_attachment",
+)
+def stream_conversation_attachment(
+    conversation_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stream a conversation attachment after checking its membership ACL."""
+    _require_membership(db, conversation_id, current_user.id)
+    attachment = db.scalar(
+        select(Attachment)
+        .join(Message, Message.id == Attachment.message_id)
+        .where(
+            Attachment.id == attachment_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    if uses_local_storage():
+        path = get_local_attachment_path(attachment.object_key)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Attachment file not found")
+        return FileResponse(
+            path,
+            media_type=attachment.content_type,
+            filename=attachment.filename,
+        )
+
+    try:
+        url = create_attachment_download_url(
+            attachment.object_key,
+            attachment.filename,
+            attachment.content_type,
+        )
+    except Exception as error:
+        logger.exception("GODHEAD attachment download URL generation failed")
+        raise HTTPException(status_code=503, detail="Attachment storage is unavailable") from error
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get(

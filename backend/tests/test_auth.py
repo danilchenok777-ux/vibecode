@@ -1,15 +1,21 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.database import Base, SessionLocal, _engine
 from app.main import app
+from app.security import reset_auth_rate_limits_for_tests
+from app.security import decode_access_token_claims
+from app.models import AuthSession
 
 @pytest.fixture(autouse=True)
 def clean_database():
+    reset_auth_rate_limits_for_tests()
     Base.metadata.drop_all(bind=_engine)
     Base.metadata.create_all(bind=_engine)
     yield
     Base.metadata.drop_all(bind=_engine)
+    reset_auth_rate_limits_for_tests()
 
 
 def test_register_login_and_profile():
@@ -57,6 +63,42 @@ def test_duplicate_registration_and_bad_login():
 def test_profile_requires_token():
     with TestClient(app) as client:
         assert client.get("/v1/users/me").status_code == 401
+
+
+def test_login_attempts_are_rate_limited():
+    with TestClient(app) as client:
+        registered = client.post("/v1/auth/register", json={
+            "email": "rate_limit@example.com",
+            "username": "rate_limit_user",
+            "password": "a-long-secure-password",
+            "display_name": "Rate Limit User",
+        })
+        assert registered.status_code == 201
+
+        for _ in range(10):
+            response = client.post("/v1/auth/login", json={
+                "email": "rate_limit@example.com",
+                "password": "wrong-password",
+            })
+            assert response.status_code == 401
+        limited = client.post("/v1/auth/login", json={
+            "email": "rate_limit@example.com",
+            "password": "wrong-password",
+        })
+        assert limited.status_code == 429
+        assert int(limited.headers["retry-after"]) > 0
+
+
+def test_cors_preflight_includes_message_and_session_verbs():
+    with TestClient(app) as client:
+        response = client.options("/v1/conversations/1/read", headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        })
+        assert response.status_code == 200
+        assert "PUT" in response.headers["access-control-allow-methods"]
+        assert "authorization" in response.headers["access-control-allow-headers"].lower()
 
 
 def test_user_search_requires_auth_and_returns_only_public_fields():
@@ -142,6 +184,27 @@ def test_logout_revokes_only_the_current_access_session():
 def test_logout_requires_a_valid_access_session():
     with TestClient(app) as client:
         assert client.post("/v1/auth/logout").status_code == 401
+
+
+def test_expired_server_session_rejects_a_still_signed_access_token():
+    with TestClient(app) as client:
+        registered = client.post("/v1/auth/register", json={
+            "email": "expired@example.com",
+            "username": "expired_user",
+            "password": "a-long-secure-password",
+            "display_name": "Expired User",
+        })
+        assert registered.status_code == 201
+        token = registered.json()["access_token"]
+        token_id = decode_access_token_claims(token)["jti"]
+
+        with SessionLocal() as db:
+            session = db.query(AuthSession).filter(AuthSession.jti == token_id).one()
+            session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+
+        response = client.get("/v1/users/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
 
 
 def test_active_sessions_can_be_listed_and_revoked_individually():

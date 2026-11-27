@@ -33,6 +33,7 @@ class GodheadRealtimeClient(
         fun onMessage(message: GodheadRealtimeMessage)
         fun onDisconnected(code: Int, reason: String)
         fun onError(error: Throwable)
+        fun onStateEvent(type: String, data: JSONObject) = Unit
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -44,6 +45,19 @@ class GodheadRealtimeClient(
 
     private val request: Request
     @Volatile private var webSocket: WebSocket? = null
+    @Volatile private var closedByClient = true
+    private var reconnectDelayMs = 1_000L
+    private val reconnectRunnable = Runnable { openSocket() }
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            val socket = webSocket ?: return
+            if (!socket.send("ping")) {
+                scheduleReconnect()
+                return
+            }
+            mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+        }
+    }
 
     init {
         require(accessToken.isNotBlank()) { "GODHEAD access token is required" }
@@ -60,10 +74,27 @@ class GodheadRealtimeClient(
     }
 
     fun connect() {
-        if (webSocket != null) return
-        webSocket = http.newWebSocket(request, object : WebSocketListener() {
+        closedByClient = false
+        openSocket()
+    }
+
+    private fun openSocket() {
+        if (closedByClient || webSocket != null) return
+        mainHandler.removeCallbacks(reconnectRunnable)
+        val socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                mainHandler.post { listener.onConnected() }
+                if (closedByClient) {
+                    webSocket.close(1000, "Client disconnected")
+                    return
+                }
+                this@GodheadRealtimeClient.webSocket = webSocket
+                reconnectDelayMs = 1_000L
+                mainHandler.removeCallbacks(reconnectRunnable)
+                mainHandler.removeCallbacks(heartbeatRunnable)
+                mainHandler.post {
+                    listener.onConnected()
+                    heartbeatRunnable.run()
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -79,6 +110,12 @@ class GodheadRealtimeClient(
                             createdAt = data.optString("created_at")
                         )
                         mainHandler.post { listener.onMessage(message) }
+                    } else {
+                        val type = event.optString("type")
+                        if (type == "message.delivered" || type == "read.state.updated") {
+                            val data = event.optJSONObject("data") ?: JSONObject()
+                            mainHandler.post { listener.onStateEvent(type, data) }
+                        }
                     }
                 } catch (error: Exception) {
                     mainHandler.post { listener.onError(error) }
@@ -90,21 +127,48 @@ class GodheadRealtimeClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                this@GodheadRealtimeClient.webSocket = null
+                clearSocket(webSocket)
                 mainHandler.post { listener.onDisconnected(code, reason) }
+                if (code == 4401 || code == 4403) {
+                    closedByClient = true
+                } else {
+                    scheduleReconnect()
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                this@GodheadRealtimeClient.webSocket = null
+                clearSocket(webSocket)
                 mainHandler.post { listener.onError(t) }
+                scheduleReconnect()
             }
         })
+        webSocket = socket
+    }
+
+    private fun clearSocket(socket: WebSocket) {
+        if (webSocket === socket) webSocket = null
+        mainHandler.removeCallbacks(heartbeatRunnable)
+    }
+
+    private fun scheduleReconnect() {
+        if (closedByClient) return
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.postDelayed(reconnectRunnable, reconnectDelayMs)
+        reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
     }
 
     fun sendPing(): Boolean = webSocket?.send("ping") ?: false
 
     fun disconnect() {
+        closedByClient = true
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.removeCallbacks(heartbeatRunnable)
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
+    }
+
+    private companion object {
+        const val HEARTBEAT_INTERVAL_MS = 20_000L
+        const val MAX_RECONNECT_DELAY_MS = 30_000L
     }
 }

@@ -1,6 +1,8 @@
 # GODHEAD API
 
-The GODHEAD API currently implements first-party account identity and the initial messaging service: registration, login, authenticated profiles, private conversations, group conversations, message history, per-member read cursors, private S3-compatible file attachments, and live message events over WebSocket.
+The GODHEAD API currently implements first-party account identity and messaging: registration, login, authenticated profiles, private and group conversations, paged history, unread counts, delivery/read receipts, private attachments, and live message events over WebSocket.
+
+Attachments use local disk by default at `.godhead_storage/attachments`. This is appropriate for a single Wispbyte server when its files directory is retained across normal restarts and deployments; the directory is kept outside Git and should be backed up. For Docker Compose or a multi-instance deployment, set `GODHEAD_ATTACHMENT_STORAGE_BACKEND=s3` and configure the S3 settings. The example environment and Compose stack use S3/MinIO.
 
 ## Local development
 
@@ -41,7 +43,7 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, wa
 - `GET /v1/users/search?query=...` — search public usernames and display names; results never expose email addresses or password data.
 - `POST /v1/conversations/direct/{user_id}` — open or retrieve a unique private conversation.
 - `POST /v1/conversations/groups` — create a group conversation.
-- `GET /v1/conversations` — list the current user's conversations.
+- `GET /v1/conversations` — list the current user's conversations with member-scoped unread counts.
 - `POST /v1/conversations/{id}/messages` — send a text message.
 - `GET /v1/conversations/{id}/messages` — page through message history using `before_id`.
 - `PUT /v1/conversations/{id}/read` — advance the current member's read cursor to a message in that conversation.
@@ -49,7 +51,8 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, wa
 - `POST /v1/conversations/{id}/messages/{message_id}/delivery` — the recipient records that a message reached an authenticated client. The sender cannot acknowledge their own message; repeated acknowledgements are idempotent.
 - `GET /v1/conversations/{id}/messages/{message_id}/delivery-states` — list each recipient's delivery timestamp; a null timestamp means no recipient acknowledgement has arrived yet.
 - `POST /v1/conversations/{id}/attachments` — upload a file and create a message containing its metadata. Maximum file size is 25 MiB; MIME types are allow-listed.
-- `GET /v1/conversations/{id}/attachments/{attachment_id}/download` — obtain a short-lived signed download URL after conversation-membership validation.
+- `GET /v1/conversations/{id}/attachments/{attachment_id}/download` — obtain a private local content path or a short-lived signed S3 URL after membership validation.
+- `GET /v1/conversations/{id}/attachments/{attachment_id}/content` — stream a local attachment after membership validation; S3 deployments redirect to a short-lived signed URL.
 
 
 - `GET /health/live` and `GET /health/ready` — process and database checks.
@@ -58,6 +61,6 @@ The API container waits for PostgreSQL, applies versioned Alembic migrations, wa
 
 Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Connections revalidate the server-side session while active and are closed after a token is revoked or expires. A text frame containing `ping` returns a `pong` event. New chat messages are delivered as `message.created` JSON events to all connected members of that conversation. A recipient's first delivery acknowledgement emits a `message.delivered` event to the sender. Advancing a member's read cursor emits a `read.state.updated` event to the same conversation. Message creation, delivery acknowledgements and read-cursor updates remain authenticated HTTP operations.
 
-## Current production gaps
+## Remaining production gaps
 
-WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
+WebSocket fan-out and authentication rate limits are process-local; horizontal deployments need a shared broker and shared rate-limit store. Before public production, add email verification, password reset, refresh-token rotation, malware scanning, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.

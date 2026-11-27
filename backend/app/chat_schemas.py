@@ -41,6 +41,7 @@ class ConversationResponse(BaseModel):
     member_ids: list[int]
     created_at: datetime
     updated_at: datetime
+    unread_count: int = 0
     last_message: MessageResponse | None = None
 
 

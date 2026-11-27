@@ -1,13 +1,47 @@
 from datetime import datetime, timedelta, timezone
+from collections import deque
+import math
+from threading import Lock
+import time
 from uuid import uuid4
 
 import jwt
+from fastapi import HTTPException, status
 from pwdlib import PasswordHash
 
 from .config import get_settings
 
 _password_hash = PasswordHash.recommended()
 DUMMY_HASH = _password_hash.hash("not-a-real-user-password")
+_auth_attempts: dict[tuple[str, str], deque[float]] = {}
+_auth_attempts_lock = Lock()
+
+
+def enforce_auth_rate_limit(scope: str, identity: str, limit: int, period_seconds: int) -> None:
+    """Bound repeated auth attempts for the same normalized account identifier."""
+    now = time.monotonic()
+    key = (scope, identity.strip().lower())
+    with _auth_attempts_lock:
+        bucket = _auth_attempts.setdefault(key, deque())
+        while bucket and now - bucket[0] >= period_seconds:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            retry_after = max(1, math.ceil(period_seconds - (now - bucket[0])))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts. Try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
+        if len(_auth_attempts) > 4096:
+            for expired_key in list(_auth_attempts)[:1024]:
+                if expired_key != key:
+                    _auth_attempts.pop(expired_key, None)
+
+
+def reset_auth_rate_limits_for_tests() -> None:
+    with _auth_attempts_lock:
+        _auth_attempts.clear()
 
 
 def hash_password(password: str) -> str:

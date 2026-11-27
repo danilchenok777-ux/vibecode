@@ -8,7 +8,13 @@ from .auth import get_current_user
 from .database import get_db
 from .models import AuthSession, User
 from .schemas import AuthSessionResponse, LoginRequest, PublicUserResponse, RegisterRequest, TokenResponse, UserResponse
-from .security import DUMMY_HASH, create_access_token, hash_password, verify_password
+from .security import (
+    DUMMY_HASH,
+    create_access_token,
+    enforce_auth_rate_limit,
+    hash_password,
+    verify_password,
+)
 from .auth import get_current_auth_session
 
 router = APIRouter(prefix="/v1")
@@ -27,6 +33,7 @@ def _issue_session(user: User, db: Session) -> TokenResponse:
 
 @router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    enforce_auth_rate_limit("register", str(payload.email), limit=5, period_seconds=3600)
     user = User(
         email=str(payload.email),
         username=payload.username,
@@ -47,6 +54,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    enforce_auth_rate_limit("login", str(payload.email), limit=10, period_seconds=900)
     user = db.scalar(select(User).where(User.email == str(payload.email)))
     encoded = user.password_hash if user else DUMMY_HASH
     valid = verify_password(payload.password, encoded)
