@@ -60,7 +60,7 @@ Connect to `/v1/ws` with an `Authorization: Bearer <access-token>` header. Conne
 
 ## Current production gaps
 
-WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, per-message delivery acknowledgements, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
+WebSocket fan-out is process-local; horizontal deployments need a shared broker such as Redis. Before public production, add rate limiting, email verification, password reset, refresh-token rotation, malware scanning and stricter content inspection, storage quotas/lifecycle policies, moderation/abuse controls, audit events, observability, backups, deployment hardening, load tests and an independent security review. Voice/video, push notifications, GRAM and Premium services are not implemented by this API yet. Do not expose it using development secrets or a single-process SQLite setup.
 
 
 ## Northflank deployment
