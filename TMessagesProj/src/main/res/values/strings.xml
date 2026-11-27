@@ -11754,4 +11754,7 @@
     <string name="GodheadRemoteSession">Session #%1$d\nCreated: %2$s\nExpires: %3$s</string>
     <string name="GodheadRevokeSession">Revoke</string>
     <string name="GodheadSessionRevoked">Remote session revoked. That access token can no longer be used.</string>
+    <string name="GodheadDeliverySent">Sent</string>
+    <string name="GodheadDeliverySummary">Delivered to %1$d of %2$d recipients</string>
+    <string name="GodheadDeliveryStatusUnavailable">Delivery status unavailable</string>
 </resources>
