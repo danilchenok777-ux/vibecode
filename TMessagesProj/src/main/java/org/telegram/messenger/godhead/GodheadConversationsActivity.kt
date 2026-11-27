@@ -41,6 +41,8 @@ class GodheadConversationsActivity : Activity() {
     private var currentUserId: Long? = null
     private var realtime: GodheadRealtimeClient? = null
     private val displayedMessageIds = mutableSetOf<Long>()
+    private val deliveryLabels = mutableMapOf<Long, TextView>()
+    private val displayedMessages = mutableMapOf<Long, GodheadMessage>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -243,6 +245,12 @@ class GodheadConversationsActivity : Activity() {
                 }
             }
 
+            override fun onDeliveryStateUpdated(state: GodheadDeliveryState, conversationId: Long) {
+                if (selected?.id == conversationId) {
+                    displayedMessages[state.messageId]?.let { refreshDeliveryReceipt(it) }
+                }
+            }
+
             override fun onDisconnected(code: Int, reason: String) {
                 status.text = getString(R.string.GodheadRealtimeDisconnected)
             }
@@ -281,6 +289,8 @@ class GodheadConversationsActivity : Activity() {
     private fun selectChat(chat: GodheadConversation) {
         selected = chat
         displayedMessageIds.clear()
+        deliveryLabels.clear()
+        displayedMessages.clear()
         messages.removeAllViews()
         readReceipts.text = getString(R.string.GodheadReadReceiptsLoading)
         status.text = getString(R.string.GodheadLoadingMessages)
@@ -307,6 +317,7 @@ class GodheadConversationsActivity : Activity() {
     private fun appendMessage(message: GodheadMessage) {
         if (message.conversationId != selected?.id) return
         if (!displayedMessageIds.add(message.id)) return
+        displayedMessages[message.id] = message
         val sender = if (message.senderId == currentUserId) {
             getString(R.string.GodheadMessageFromYou)
         } else {
@@ -322,6 +333,24 @@ class GodheadConversationsActivity : Activity() {
             text = sender + "\n" + message.content
             textSize = 15f
         }, matchParams())
+        if (message.senderId == currentUserId) {
+            val receipt = TextView(this).apply {
+                text = getString(R.string.GodheadDeliverySent)
+                textSize = 11f
+                gravity = Gravity.END
+            }
+            deliveryLabels[message.id] = receipt
+            bubble.addView(receipt, matchParams())
+            scope.launch { refreshDeliveryReceipt(message) }
+        } else {
+            scope.launch {
+                try {
+                    api.acknowledgeMessageDelivery(message.conversationId, message.id)
+                } catch (_: Exception) {
+                    // A failed acknowledgement is retried when the message is loaded again.
+                }
+            }
+        }
         message.attachment?.let { attachment ->
             bubble.addView(Button(this).apply {
                 text = getString(
@@ -529,6 +558,21 @@ class GodheadConversationsActivity : Activity() {
         } catch (_: Exception) {
             if (selected?.id == conversationId) {
                 readReceipts.text = getString(R.string.GodheadReadReceiptFailed)
+            }
+        }
+    }
+
+    private suspend fun refreshDeliveryReceipt(message: GodheadMessage) {
+        val label = deliveryLabels[message.id] ?: return
+        if (message.senderId != currentUserId || selected?.id != message.conversationId) return
+        try {
+            val states = api.listMessageDeliveryStates(message.conversationId, message.id)
+            if (selected?.id != message.conversationId || deliveryLabels[message.id] !== label) return
+            val delivered = states.count { it.deliveredAt != null }
+            label.text = getString(R.string.GodheadDeliverySummary, delivered, states.size)
+        } catch (_: Exception) {
+            if (deliveryLabels[message.id] === label) {
+                label.text = getString(R.string.GodheadDeliveryStatusUnavailable)
             }
         }
     }
