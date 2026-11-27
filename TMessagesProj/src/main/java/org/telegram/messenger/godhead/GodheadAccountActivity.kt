@@ -58,8 +58,8 @@ class GodheadAccountActivity : Activity() {
         }, spacedParams())
 
         val preferences = getSharedPreferences(CONFIG_PREFS, MODE_PRIVATE)
-        val savedEndpoint = preferences.getString(CONFIG_BASE_URL, null)
-            ?: if (BuildConfig.DEBUG) "http://10.0.2.2:8000" else ""
+        val savedEndpoint = preferences.getString(CONFIG_BASE_URL, null)?.takeIf { it.isNotBlank() }
+            ?: if (BuildConfig.DEBUG) "http://10.0.2.2:8000" else DEFAULT_PRODUCTION_API_BASE_URL
 
         serverField = addField(content, getString(R.string.GodheadServerUrl), savedEndpoint).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
@@ -316,5 +316,6 @@ class GodheadAccountActivity : Activity() {
     private companion object {
         const val CONFIG_PREFS = "godhead_client_config"
         const val CONFIG_BASE_URL = "api_base_url"
+        const val DEFAULT_PRODUCTION_API_BASE_URL = "https://godhead-api.wispbyte.app"
     }
 }
