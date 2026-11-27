@@ -3,14 +3,17 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, _engine
 from app.main import app
+from app.security import reset_auth_rate_limits_for_tests
 
 
 @pytest.fixture(autouse=True)
 def clean_database():
+    reset_auth_rate_limits_for_tests()
     Base.metadata.drop_all(bind=_engine)
     Base.metadata.create_all(bind=_engine)
     yield
     Base.metadata.drop_all(bind=_engine)
+    reset_auth_rate_limits_for_tests()
 
 
 def register(client: TestClient, username: str):
@@ -184,6 +187,10 @@ def test_read_cursors_are_member_scoped_and_never_move_backwards():
         assert first.status_code == 201
         assert second.status_code == 201
 
+        unread_before_read = client.get("/v1/conversations", headers=auth(token_b))
+        assert unread_before_read.status_code == 200
+        assert unread_before_read.json()[0]["unread_count"] == 2
+
         initial_states = client.get(
             f"/v1/conversations/{conversation_id}/read-states",
             headers=auth(token_a),
@@ -200,6 +207,8 @@ def test_read_cursors_are_member_scoped_and_never_move_backwards():
         assert marked.status_code == 200, marked.text
         assert marked.json()["last_read_message_id"] == second.json()["id"]
         assert marked.json()["user_id"] == user_b["id"]
+        unread_after_read = client.get("/v1/conversations", headers=auth(token_b))
+        assert unread_after_read.json()[0]["unread_count"] == 0
 
         # A stale page from another device must not rewind the cursor.
         stale_mark = client.put(
@@ -288,6 +297,7 @@ def test_conversation_attachment_upload_and_private_download(monkeypatch):
     monkeypatch.setattr("app.chat_routes.upload_attachment_object", fake_upload)
     monkeypatch.setattr("app.chat_routes.delete_attachment_object", fake_delete)
     monkeypatch.setattr("app.chat_routes.create_attachment_download_url", fake_download_url)
+    monkeypatch.setattr("app.chat_routes.uses_local_storage", lambda: False)
 
     with TestClient(app) as client:
         token_a, user_a = register(client, "media_sender")
@@ -357,6 +367,13 @@ def test_attachment_upload_rejects_unsupported_and_oversized_files(monkeypatch):
         )
         assert unsupported.status_code == 415
 
+        bad_signature = client.post(
+            f"/v1/conversations/{conversation_id}/attachments",
+            headers=auth(token_a),
+            files={"file": ("spoofed.png", b"not a PNG", "image/png")},
+        )
+        assert bad_signature.status_code == 415
+
         from app import chat_routes
         monkeypatch.setattr(chat_routes, "MAX_ATTACHMENT_BYTES", 3)
         oversized = client.post(
@@ -372,6 +389,61 @@ def test_attachment_upload_rejects_unsupported_and_oversized_files(monkeypatch):
         )
         assert history.status_code == 200
         assert history.json()["items"] == []
+
+
+def test_local_attachment_storage_streams_only_for_conversation_members(tmp_path, monkeypatch):
+    from app import chat_routes, storage
+    from app.config import get_settings
+
+    settings = get_settings().model_copy(update={
+        "attachment_storage_backend": "local",
+        "local_storage_dir": str(tmp_path / "attachments"),
+    })
+    monkeypatch.setattr(storage, "get_settings", lambda: settings)
+    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings)
+
+    with TestClient(app) as client:
+        token_a, _ = register(client, "local_media_sender")
+        token_b, user_b = register(client, "local_media_receiver")
+        token_c, _ = register(client, "local_media_outsider")
+        opened = client.post(
+            f"/v1/conversations/direct/{user_b['id']}",
+            headers=auth(token_a),
+        )
+        assert opened.status_code == 200
+        conversation_id = opened.json()["id"]
+        image = b"\x89PNG\r\n\x1a\nprivate-image-bytes"
+        uploaded = client.post(
+            f"/v1/conversations/{conversation_id}/attachments",
+            headers=auth(token_a),
+            files={"file": ("photo.png", image, "image/png")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        attachment_id = uploaded.json()["attachment"]["id"]
+
+        metadata = client.get(
+            f"/v1/conversations/{conversation_id}/attachments/{attachment_id}/download",
+            headers=auth(token_b),
+        )
+        assert metadata.status_code == 200
+        download_path = metadata.json()["url"]
+        assert download_path.endswith(f"/{attachment_id}/content")
+        assert metadata.json()["expires_in"] == 0
+
+        downloaded = client.get(download_path, headers=auth(token_b))
+        assert downloaded.status_code == 200
+        assert downloaded.content == image
+        assert downloaded.headers["content-type"] == "image/png"
+
+        private = client.get(download_path, headers=auth(token_c))
+        assert private.status_code == 404
+
+        local_file = storage.get_local_attachment_path(
+            f"conversations/{conversation_id}/missing-object"
+        )
+        assert not local_file.exists()
+        with pytest.raises(ValueError, match="Invalid attachment object key"):
+            storage.get_local_attachment_path("../../outside-file")
 
 def test_message_delivery_acknowledgement_is_recipient_only_and_idempotent():
     with TestClient(app) as client:
