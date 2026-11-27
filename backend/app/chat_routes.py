@@ -14,11 +14,12 @@ from sqlalchemy.orm import Session
 from .auth import get_current_user
 from .config import get_settings
 from .database import get_db
-from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, User
+from .models import Attachment, Conversation, ConversationMember, ConversationReadState, Message, MessageDeliveryState, User
 from .chat_schemas import (
     ConversationResponse, CreateGroupRequest, CreateMessageRequest,
     MessagePageResponse, MessageResponse, MarkConversationReadRequest,
     ConversationReadStateResponse, AttachmentDownloadResponse, AttachmentResponse,
+    MessageDeliveryStateResponse,
 )
 from .chat_realtime import connection_manager
 from .storage import (
@@ -519,3 +520,97 @@ def list_conversation_read_states(
         for row in rows
     ]
 
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/delivery",
+    response_model=MessageDeliveryStateResponse,
+)
+def acknowledge_message_delivery(
+    conversation_id: int,
+    message_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    message = db.scalar(
+        select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.sender_id == current_user.id:
+        raise HTTPException(status_code=422, detail="Sender cannot acknowledge own message")
+
+    state = db.get(MessageDeliveryState, (message_id, current_user.id))
+    if state is None:
+        state = MessageDeliveryState(
+            message_id=message_id,
+            user_id=current_user.id,
+            delivered_at=datetime.now(timezone.utc),
+        )
+        db.add(state)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Multiple devices may acknowledge the same message simultaneously.
+            db.rollback()
+            state = db.get(MessageDeliveryState, (message_id, current_user.id))
+            if state is None:
+                raise
+    db.refresh(state)
+    result = MessageDeliveryStateResponse(
+        message_id=state.message_id,
+        user_id=state.user_id,
+        delivered_at=state.delivered_at,
+    )
+    recipients = db.scalars(
+        select(ConversationMember.user_id)
+        .where(ConversationMember.conversation_id == conversation_id)
+    ).all()
+    event = {
+        "type": "message.delivered",
+        "data": {
+            **jsonable_encoder(result),
+            "conversation_id": conversation_id,
+        },
+    }
+    background_tasks.add_task(connection_manager.broadcast, list(recipients), event)
+    return result
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages/{message_id}/delivery-states",
+    response_model=list[MessageDeliveryStateResponse],
+)
+def list_message_delivery_states(
+    conversation_id: int,
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_membership(db, conversation_id, current_user.id)
+    message = db.scalar(
+        select(Message.id).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    states = db.scalars(
+        select(MessageDeliveryState)
+        .where(MessageDeliveryState.message_id == message_id)
+        .order_by(MessageDeliveryState.user_id.asc())
+    ).all()
+    return [
+        MessageDeliveryStateResponse(
+            message_id=state.message_id,
+            user_id=state.user_id,
+            delivered_at=state.delivered_at,
+        )
+        for state in states
+    ]
