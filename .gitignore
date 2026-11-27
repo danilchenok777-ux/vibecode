@@ -27,8 +27,9 @@ Tools/invisible.txt
 invisible.txt
 *.dm
 
-# All API key files
+# All API key files and private service configuration
 API_KEYS*
+TMessagesProj/google-services.json
 
 # Kotlin compiler temp files
 .kotlin/
