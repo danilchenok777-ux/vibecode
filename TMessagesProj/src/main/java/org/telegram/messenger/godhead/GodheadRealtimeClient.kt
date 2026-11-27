@@ -33,6 +33,7 @@ class GodheadRealtimeClient(
         fun onConnected()
         fun onMessage(message: GodheadRealtimeMessage)
         fun onReadStateUpdated(state: GodheadReadState)
+        fun onDeliveryStateUpdated(state: GodheadDeliveryState, conversationId: Long)
         fun onDisconnected(code: Int, reason: String)
         fun onError(error: Throwable)
     }
@@ -92,6 +93,19 @@ class GodheadRealtimeClient(
                                 attachment = attachment
                             )
                             mainHandler.post { listener.onMessage(message) }
+                        }
+                        "message.delivered" -> {
+                            val data = event.getJSONObject("data")
+                            val state = GodheadDeliveryState(
+                                messageId = data.getLong("message_id"),
+                                userId = data.getLong("user_id"),
+                                deliveredAt = if (data.isNull("delivered_at")) null
+                                    else data.optString("delivered_at")
+                            )
+                            val conversationId = data.getLong("conversation_id")
+                            mainHandler.post {
+                                listener.onDeliveryStateUpdated(state, conversationId)
+                            }
                         }
                         "read.state.updated" -> {
                             val data = event.getJSONObject("data")
