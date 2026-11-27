@@ -16,7 +16,8 @@ data class GodheadRealtimeMessage(
     val conversationId: Long,
     val senderId: Long,
     val content: String,
-    val createdAt: String
+    val createdAt: String,
+    val attachment: GodheadAttachment? = null
 )
 
 /**
@@ -31,6 +32,8 @@ class GodheadRealtimeClient(
     interface Listener {
         fun onConnected()
         fun onMessage(message: GodheadRealtimeMessage)
+        fun onReadStateUpdated(state: GodheadReadState)
+        fun onDeliveryStateUpdated(state: GodheadDeliveryState, conversationId: Long)
         fun onDisconnected(code: Int, reason: String)
         fun onError(error: Throwable)
     }
@@ -69,16 +72,53 @@ class GodheadRealtimeClient(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val event = JSONObject(text)
-                    if (event.optString("type") == "message.created") {
-                        val data = event.getJSONObject("data")
-                        val message = GodheadRealtimeMessage(
-                            id = data.getLong("id"),
-                            conversationId = data.getLong("conversation_id"),
-                            senderId = data.getLong("sender_id"),
-                            content = data.getString("content"),
-                            createdAt = data.optString("created_at")
-                        )
-                        mainHandler.post { listener.onMessage(message) }
+                    when (event.optString("type")) {
+                        "message.created" -> {
+                            val data = event.getJSONObject("data")
+                            val attachmentJson = data.optJSONObject("attachment")
+                            val attachment = attachmentJson?.let {
+                                GodheadAttachment(
+                                    id = it.getLong("id"),
+                                    filename = it.getString("filename"),
+                                    contentType = it.getString("content_type"),
+                                    sizeBytes = it.getLong("size_bytes")
+                                )
+                            }
+                            val message = GodheadRealtimeMessage(
+                                id = data.getLong("id"),
+                                conversationId = data.getLong("conversation_id"),
+                                senderId = data.getLong("sender_id"),
+                                content = data.getString("content"),
+                                createdAt = data.optString("created_at"),
+                                attachment = attachment
+                            )
+                            mainHandler.post { listener.onMessage(message) }
+                        }
+                        "message.delivered" -> {
+                            val data = event.getJSONObject("data")
+                            val state = GodheadDeliveryState(
+                                messageId = data.getLong("message_id"),
+                                userId = data.getLong("user_id"),
+                                deliveredAt = if (data.isNull("delivered_at")) null
+                                    else data.optString("delivered_at")
+                            )
+                            val conversationId = data.getLong("conversation_id")
+                            mainHandler.post {
+                                listener.onDeliveryStateUpdated(state, conversationId)
+                            }
+                        }
+                        "read.state.updated" -> {
+                            val data = event.getJSONObject("data")
+                            val state = GodheadReadState(
+                                conversationId = data.getLong("conversation_id"),
+                                userId = data.getLong("user_id"),
+                                lastReadMessageId = if (data.isNull("last_read_message_id")) null
+                                    else data.getLong("last_read_message_id"),
+                                updatedAt = if (data.isNull("updated_at")) null
+                                    else data.optString("updated_at")
+                            )
+                            mainHandler.post { listener.onReadStateUpdated(state) }
+                        }
                     }
                 } catch (error: Exception) {
                     mainHandler.post { listener.onError(error) }

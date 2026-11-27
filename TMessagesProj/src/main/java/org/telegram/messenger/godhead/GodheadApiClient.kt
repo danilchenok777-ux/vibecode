@@ -3,6 +3,7 @@ package org.telegram.messenger.godhead
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -38,7 +39,34 @@ data class GodheadMessage(
     val conversationId: Long,
     val senderId: Long,
     val content: String,
-    val createdAt: String
+    val createdAt: String,
+    val attachment: GodheadAttachment? = null
+)
+
+data class GodheadAttachment(
+    val id: Long,
+    val filename: String,
+    val contentType: String,
+    val sizeBytes: Long
+)
+
+data class GodheadAttachmentDownload(
+    val attachment: GodheadAttachment,
+    val url: String,
+    val expiresInSeconds: Long
+)
+
+data class GodheadReadState(
+    val conversationId: Long,
+    val userId: Long,
+    val lastReadMessageId: Long?,
+    val updatedAt: String?
+)
+
+data class GodheadDeliveryState(
+    val messageId: Long,
+    val userId: Long,
+    val deliveredAt: String?
 )
 
 data class GodheadConversation(
@@ -79,9 +107,9 @@ class GodheadApiClient(baseUrl: String) {
     private val baseUrl: String
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
     init {
@@ -292,6 +320,127 @@ class GodheadApiClient(baseUrl: String) {
         }
     }
 
+    suspend fun uploadAttachment(
+        accessToken: String,
+        conversationId: Long,
+        filename: String,
+        contentType: String,
+        bytes: ByteArray,
+        caption: String = ""
+    ): GodheadMessage {
+        require(conversationId > 0) { "Conversation ID must be positive" }
+        require(filename.isNotBlank()) { "Attachment filename is required" }
+        require(contentType.isNotBlank()) { "Attachment content type is required" }
+        require(bytes.isNotEmpty()) { "Attachment cannot be empty" }
+        require(bytes.size <= 25 * 1024 * 1024) { "Attachment cannot exceed 25 MiB" }
+        require(caption.length <= 4096) { "Attachment caption cannot exceed 4096 characters" }
+
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "file",
+                filename,
+                bytes.toRequestBody(contentType.toMediaType())
+            )
+            .addFormDataPart("caption", caption)
+            .build()
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/attachments",
+            accessToken
+        ).post(multipart).build()
+        return parseMessage(execute(request))
+    }
+
+    suspend fun createAttachmentDownload(
+        accessToken: String,
+        conversationId: Long,
+        attachmentId: Long
+    ): GodheadAttachmentDownload {
+        require(conversationId > 0 && attachmentId > 0) {
+            "Conversation and attachment IDs must be positive"
+        }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/attachments/$attachmentId/download",
+            accessToken
+        ).get().build()
+        val response = execute(request)
+        val metadata = response.getJSONObject("attachment")
+        val attachment = parseAttachment(metadata)
+        return GodheadAttachmentDownload(
+            attachment = attachment,
+            url = response.getString("url"),
+            expiresInSeconds = response.getLong("expires_in")
+        )
+    }
+
+    suspend fun markConversationRead(
+        accessToken: String,
+        conversationId: Long,
+        lastReadMessageId: Long
+    ): GodheadReadState {
+        require(conversationId > 0 && lastReadMessageId > 0) {
+            "Conversation and message IDs must be positive"
+        }
+        val payload = JSONObject().put("last_read_message_id", lastReadMessageId)
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/read",
+            accessToken
+        ).put(payload.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+        return parseReadState(execute(request))
+    }
+
+    suspend fun listConversationReadStates(
+        accessToken: String,
+        conversationId: Long
+    ): List<GodheadReadState> {
+        require(conversationId > 0) { "Conversation ID must be positive" }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/read-states",
+            accessToken
+        ).get().build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                add(parseReadState(array.getJSONObject(index)))
+            }
+        }
+    }
+
+    suspend fun acknowledgeMessageDelivery(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): GodheadDeliveryState {
+        require(conversationId > 0 && messageId > 0) {
+            "Conversation and message IDs must be positive"
+        }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery",
+            accessToken
+        ).post("{}".toRequestBody(JSON_MEDIA_TYPE)).build()
+        return parseDeliveryState(execute(request))
+    }
+
+    suspend fun listMessageDeliveryStates(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): List<GodheadDeliveryState> {
+        require(conversationId > 0 && messageId > 0) {
+            "Conversation and message IDs must be positive"
+        }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery-states",
+            accessToken
+        ).get().build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                add(parseDeliveryState(array.getJSONObject(index)))
+            }
+        }
+    }
+
     private fun authorizedRequest(path: String, token: String): Request.Builder {
         require(token.isNotBlank()) { "Access token is required" }
         return Request.Builder()
@@ -348,12 +497,38 @@ class GodheadApiClient(baseUrl: String) {
         }
     }
 
-    private fun parseMessage(json: JSONObject) = GodheadMessage(
+    private fun parseMessage(json: JSONObject): GodheadMessage {
+        val attachment = if (!json.has("attachment") || json.isNull("attachment")) null
+            else parseAttachment(json.getJSONObject("attachment"))
+        return GodheadMessage(
+            id = json.getLong("id"),
+            conversationId = json.getLong("conversation_id"),
+            senderId = json.getLong("sender_id"),
+            content = json.getString("content"),
+            createdAt = json.optString("created_at"),
+            attachment = attachment
+        )
+    }
+
+    private fun parseAttachment(json: JSONObject) = GodheadAttachment(
         id = json.getLong("id"),
+        filename = json.getString("filename"),
+        contentType = json.getString("content_type"),
+        sizeBytes = json.getLong("size_bytes")
+    )
+
+    private fun parseReadState(json: JSONObject) = GodheadReadState(
         conversationId = json.getLong("conversation_id"),
-        senderId = json.getLong("sender_id"),
-        content = json.getString("content"),
-        createdAt = json.optString("created_at")
+        userId = json.getLong("user_id"),
+        lastReadMessageId = if (json.isNull("last_read_message_id")) null
+            else json.getLong("last_read_message_id"),
+        updatedAt = if (json.isNull("updated_at")) null else json.optString("updated_at")
+    )
+
+    private fun parseDeliveryState(json: JSONObject) = GodheadDeliveryState(
+        messageId = json.getLong("message_id"),
+        userId = json.getLong("user_id"),
+        deliveredAt = if (json.isNull("delivered_at")) null else json.optString("delivered_at")
     )
 
     private fun parseConversation(json: JSONObject): GodheadConversation {

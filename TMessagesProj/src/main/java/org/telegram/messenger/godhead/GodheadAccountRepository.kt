@@ -70,6 +70,49 @@ class GodheadAccountRepository(
     suspend fun revokeSession(sessionId: Long) =
         api.revokeSession(requireAccessToken(), sessionId)
 
+    suspend fun uploadAttachment(
+        conversationId: Long,
+        filename: String,
+        contentType: String,
+        bytes: ByteArray,
+        caption: String = ""
+    ): GodheadMessage =
+        api.uploadAttachment(
+            requireAccessToken(),
+            conversationId,
+            filename,
+            contentType,
+            bytes,
+            caption
+        )
+
+    suspend fun createAttachmentDownload(
+        conversationId: Long,
+        attachmentId: Long
+    ): GodheadAttachmentDownload =
+        api.createAttachmentDownload(requireAccessToken(), conversationId, attachmentId)
+
+    suspend fun markConversationRead(
+        conversationId: Long,
+        lastReadMessageId: Long
+    ): GodheadReadState =
+        api.markConversationRead(requireAccessToken(), conversationId, lastReadMessageId)
+
+    suspend fun listConversationReadStates(conversationId: Long): List<GodheadReadState> =
+        api.listConversationReadStates(requireAccessToken(), conversationId)
+
+    suspend fun acknowledgeMessageDelivery(
+        conversationId: Long,
+        messageId: Long
+    ): GodheadDeliveryState =
+        api.acknowledgeMessageDelivery(requireAccessToken(), conversationId, messageId)
+
+    suspend fun listMessageDeliveryStates(
+        conversationId: Long,
+        messageId: Long
+    ): List<GodheadDeliveryState> =
+        api.listMessageDeliveryStates(requireAccessToken(), conversationId, messageId)
+
     private fun requireAccessToken(): String =
         sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
