@@ -22,7 +22,7 @@ The complete product target includes independently operated GODHEAD accounts, pr
 
 ## Build and configuration
 
-Follow [UPSTREAM_README.md](UPSTREAM_README.md) for Android build prerequisites. Supply your own Telegram API ID/hash while Telegram MTProto remains in use, and your own Firebase configuration if Firebase-based upstream features remain enabled. Never commit API credentials, Firebase configuration, signing keys, keystores or passwords.
+Follow [UPSTREAM_README.md](UPSTREAM_README.md) for Android build prerequisites. For step-by-step local setup on Windows, see [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md). Supply your own Telegram API ID/hash while Telegram MTProto remains in use, and your own Firebase configuration if Firebase-based upstream features remain enabled. Never commit API credentials, Firebase configuration, signing keys, keystores or passwords.
 
 ### Creating a signed Android APK
 
