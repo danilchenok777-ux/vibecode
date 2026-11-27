@@ -63,6 +63,12 @@ data class GodheadReadState(
     val updatedAt: String?
 )
 
+data class GodheadDeliveryState(
+    val messageId: Long,
+    val userId: Long,
+    val deliveredAt: String?
+)
+
 data class GodheadConversation(
     val id: Long,
     val kind: String,
@@ -400,6 +406,41 @@ class GodheadApiClient(baseUrl: String) {
         }
     }
 
+    suspend fun acknowledgeMessageDelivery(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): GodheadDeliveryState {
+        require(conversationId > 0 && messageId > 0) {
+            "Conversation and message IDs must be positive"
+        }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery",
+            accessToken
+        ).post("{}".toRequestBody(JSON_MEDIA_TYPE)).build()
+        return parseDeliveryState(execute(request))
+    }
+
+    suspend fun listMessageDeliveryStates(
+        accessToken: String,
+        conversationId: Long,
+        messageId: Long
+    ): List<GodheadDeliveryState> {
+        require(conversationId > 0 && messageId > 0) {
+            "Conversation and message IDs must be positive"
+        }
+        val request = authorizedRequest(
+            "v1/conversations/$conversationId/messages/$messageId/delivery-states",
+            accessToken
+        ).get().build()
+        val array = executeArray(request)
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                add(parseDeliveryState(array.getJSONObject(index)))
+            }
+        }
+    }
+
     private fun authorizedRequest(path: String, token: String): Request.Builder {
         require(token.isNotBlank()) { "Access token is required" }
         return Request.Builder()
@@ -482,6 +523,12 @@ class GodheadApiClient(baseUrl: String) {
         lastReadMessageId = if (json.isNull("last_read_message_id")) null
             else json.getLong("last_read_message_id"),
         updatedAt = if (json.isNull("updated_at")) null else json.optString("updated_at")
+    )
+
+    private fun parseDeliveryState(json: JSONObject) = GodheadDeliveryState(
+        messageId = json.getLong("message_id"),
+        userId = json.getLong("user_id"),
+        deliveredAt = if (json.isNull("delivered_at")) null else json.optString("delivered_at")
     )
 
     private fun parseConversation(json: JSONObject): GodheadConversation {
