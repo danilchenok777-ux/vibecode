@@ -17,7 +17,7 @@ Not implemented by this backend: end-to-end encryption, push notifications, voic
 
 ## Northflank resource layout
 
-The free Sandbox currently allows up to **2 services and 1 database**, with a monthly resource allowance. It is intended for testing/development, not production. Northflank may require a payment method for account verification. Check the live quotas and billing page before creating resources; do not treat this as guaranteed free production hosting.
+The free Sandbox currently allows up to **2 services and 1 database**, with a monthly resource allowance. It is intended for testing/development, not production. Northflank requires a payment method for account verification, even on the free Sandbox. Check the live quotas and billing page before creating resources; do not treat this as guaranteed free production hosting.
 
 Recommended allocation:
 1. One Northflank PostgreSQL addon.
@@ -39,7 +39,8 @@ Recommended allocation:
 3. Select branch `feature/northflank-godhead-api` while testing this pull request; after it is merged, use the destination branch.
 4. Configure the Docker build:
    - Build context: `backend/`
-   - Dockerfile path relative to that context: `Dockerfile`
+   - Dockerfile path relative to repository root: `/backend/Dockerfile`
+   - Build context relative to repository root: `/backend`
 5. Expose container port **8000** over HTTP. Northflank supplies HTTPS at the public service endpoint.
 6. Configure the health check path as `/health/ready` (HTTP 200).
 
