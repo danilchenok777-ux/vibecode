@@ -58,3 +58,9 @@ class ConversationReadStateResponse(BaseModel):
     user_id: int
     last_read_message_id: int | None
     updated_at: datetime | None
+
+
+class MessageDeliveryStateResponse(BaseModel):
+    message_id: int
+    user_id: int
+    delivered_at: datetime | None

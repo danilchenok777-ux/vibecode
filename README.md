@@ -5,7 +5,7 @@ GODHEAD is an Android communication platform developed from the ExteraGram clien
 ## Project structure
 
 - Android client: ExteraGram-derived Android application, rebranded with the GODHEAD application ID and name.
-- GODHEAD API: account registration, authentication, encrypted Android session storage, private/group conversation APIs, and message history.
+- GODHEAD API: Python FastAPI service in `backend/`, with PostgreSQL, Alembic migrations, account authentication, private/group chats, attachments, read cursors, delivery receipts and WebSocket events. See [backend setup](backend/README.md) and the [Northflank deployment guide](docs/NORTHFLANK_DEPLOY.md).
 - Upstream build documentation: [UPSTREAM_README.md](UPSTREAM_README.md).
 
 ## Product requirements
