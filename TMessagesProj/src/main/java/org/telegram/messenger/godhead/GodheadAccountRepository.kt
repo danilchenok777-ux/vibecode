@@ -101,6 +101,18 @@ class GodheadAccountRepository(
     suspend fun listConversationReadStates(conversationId: Long): List<GodheadReadState> =
         api.listConversationReadStates(requireAccessToken(), conversationId)
 
+    suspend fun acknowledgeMessageDelivery(
+        conversationId: Long,
+        messageId: Long
+    ): GodheadDeliveryState =
+        api.acknowledgeMessageDelivery(requireAccessToken(), conversationId, messageId)
+
+    suspend fun listMessageDeliveryStates(
+        conversationId: Long,
+        messageId: Long
+    ): List<GodheadDeliveryState> =
+        api.listMessageDeliveryStates(requireAccessToken(), conversationId, messageId)
+
     private fun requireAccessToken(): String =
         sessions.readAccessToken()
             ?: throw IllegalStateException("No GODHEAD session is stored on this device")
